@@ -51,7 +51,13 @@ const ADMIN_EMAIL = 'admin@gmail.com';
 // Check if we should use localStorage instead of Firestore
 const useLocalStorage = () => {
   const { useFirestore } = getStorageConfig();
-  return !useFirestore; // Use localStorage if Firestore is not properly configured
+  const shouldUseLocal = !useFirestore;
+  if (shouldUseLocal) {
+    console.log('�️ Using LOCAL STORAGE mode');
+  } else {
+    console.log('� Using FIRESTORE mode');
+  }
+  return shouldUseLocal;
 };
 
 const getInitialUser = (): User | null => {
@@ -602,7 +608,7 @@ export const useAuth = () => {
 };
 
 // Protected route component
-export const ProtectedRoute = ({ children }: { children: ReactNode }) => {
+export const ProtectedRoute = ({ children, adminOnly = false }: { children: ReactNode; adminOnly?: boolean }) => {
   const { user, loading } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
@@ -611,7 +617,12 @@ export const ProtectedRoute = ({ children }: { children: ReactNode }) => {
     if (!loading && !user && pathname !== '/login' && pathname !== '/register') {
       router.push('/login');
     }
-  }, [user, loading, pathname, router]);
+    
+    // Check admin access if adminOnly is true
+    if (!loading && user && adminOnly && user.role !== 'Administrator' && user.email !== 'admin@gmail.com') {
+      router.push('/'); // Redirect non-admin users to home
+    }
+  }, [user, loading, pathname, router, adminOnly]);
 
   if (loading) {
     return (
@@ -623,6 +634,18 @@ export const ProtectedRoute = ({ children }: { children: ReactNode }) => {
 
   if (!user && pathname !== '/login' && pathname !== '/register') {
     return null;
+  }
+
+  // Check admin access for admin-only routes
+  if (user && adminOnly && user.role !== 'Administrator' && user.email !== 'admin@gmail.com') {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-red-600 mb-4">Access Denied</h1>
+          <p className="text-gray-600">You don't have permission to access this page.</p>
+        </div>
+      </div>
+    );
   }
 
   return <>{children}</>;

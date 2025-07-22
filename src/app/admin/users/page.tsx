@@ -47,9 +47,19 @@ const UserManagementPage = () => {
     const [clientName, setClientName] = useState('');
     const [role, setRole] = useState('');
 
-    const fetchUsers = () => {
-        const userList = getUsers();
-        setUsers(userList);
+    const fetchUsers = async () => {
+        try {
+            const userList = await getUsers();
+            console.log('👥 Fetched users for admin page:', userList);
+            setUsers(userList);
+        } catch (error) {
+            console.error('Error fetching users:', error);
+            toast({
+                variant: 'destructive',
+                title: 'Error',
+                description: 'Failed to fetch users.',
+            });
+        }
     };
 
     useEffect(() => {
@@ -65,42 +75,62 @@ const UserManagementPage = () => {
         setRole('');
     };
 
-    const handleAddUser = (e: React.FormEvent) => {
+    const handleAddUser = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsLoading(true);
-        const success = register({
-            email,
-            password,
-            candidateName,
-            candidateId,
-            clientName,
-            role,
-        });
-
-        if (success) {
-            toast({
-                title: 'User Added Successfully',
-                description: `Account for ${candidateName} has been created.`,
+        
+        try {
+            const success = await register({
+                email,
+                password,
+                candidateName,
+                candidateId,
+                clientName,
+                role,
             });
-            fetchUsers(); // Refresh the user list
-            resetForm();
-        } else {
+
+            if (success) {
+                toast({
+                    title: 'User Added Successfully',
+                    description: `Account for ${candidateName} has been created.`,
+                });
+                await fetchUsers(); // Refresh the user list
+                resetForm();
+            } else {
+                toast({
+                    variant: 'destructive',
+                    title: 'Registration Failed',
+                    description: 'An account with this email already exists.',
+                });
+            }
+        } catch (error) {
+            console.error('Registration error:', error);
             toast({
                 variant: 'destructive',
-                title: 'Registration Failed',
-                description: 'An account with this email already exists.',
+                title: 'Registration Error',
+                description: 'An error occurred during registration. Please try again.',
             });
+        } finally {
+            setIsLoading(false);
         }
-        setIsLoading(false);
     };
     
-    const handleDeleteUser = (userId: string) => {
-        deleteUser(userId);
-        toast({
-            title: 'User Deleted',
-            description: 'The user account has been removed.',
-        });
-        fetchUsers(); // Refresh the list
+    const handleDeleteUser = async (userId: string) => {
+        try {
+            await deleteUser(userId);
+            toast({
+                title: 'User Deleted',
+                description: 'The user account has been removed.',
+            });
+            await fetchUsers(); // Refresh the list
+        } catch (error) {
+            console.error('Delete user error:', error);
+            toast({
+                variant: 'destructive',
+                title: 'Delete Error',
+                description: 'Failed to delete user. Please try again.',
+            });
+        }
     };
     
     return (
