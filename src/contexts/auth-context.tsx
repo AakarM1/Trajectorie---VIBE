@@ -10,6 +10,7 @@ import {
   convertFirestoreSubmission,
   type FirestoreUser 
 } from '@/lib/database';
+import { getStorageConfig } from '@/lib/storage-config';
 
 // Define the user type
 interface User {
@@ -49,7 +50,8 @@ const ADMIN_EMAIL = 'admin@gmail.com';
 
 // Check if we should use localStorage instead of Firestore
 const useLocalStorage = () => {
-  return process.env.NEXT_PUBLIC_USE_LOCALSTORAGE === 'true';
+  const { useFirestore } = getStorageConfig();
+  return !useFirestore; // Use localStorage if Firestore is not properly configured
 };
 
 const getInitialUser = (): User | null => {
@@ -71,18 +73,30 @@ const convertFirestoreUser = (fsUser: FirestoreUser): User => {
 };
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(getInitialUser);
+  // Always start with null to ensure server and client match
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
     const initializeAuth = async () => {
-      const storedUser = getInitialUser();
-      setUser(storedUser);
-      
-      // Seed default users for testing
-      await seedDefaultUsers();
-      setLoading(false);
+      try {
+        // Only access localStorage after component mounts (client-side only)
+        const storedUser = getInitialUser();
+        setUser(storedUser);
+        
+        // Seed default users with timeout to prevent hanging
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Timeout')), 5000)
+        );
+        
+        await Promise.race([seedDefaultUsers(), timeoutPromise]);
+      } catch (error) {
+        console.error('Error initializing auth:', error);
+        // Continue anyway - don't let seeding block the app
+      } finally {
+        setLoading(false);
+      }
     };
     
     initializeAuth();
@@ -95,31 +109,40 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       await seedUsersLocalStorage();
     } else {
       try {
-        // Check and create admin user
-        const adminUser = await userService.getByEmail(ADMIN_EMAIL);
-        if (!adminUser) {
-          await userService.create({
-            email: ADMIN_EMAIL,
-            passwordHash: 'admin@123', // In real app, this should be hashed
-            candidateName: 'Admin User',
-            candidateId: 'ADMIN001',
-            clientName: 'Trajectorie',
-            role: 'Administrator',
-          });
-        }
+        // Add a quick timeout for Firestore operations
+        const firestoreTimeout = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Firestore timeout')), 3000)
+        );
+        
+        const seedFirestore = async () => {
+          // Check and create admin user
+          const adminUser = await userService.getByEmail(ADMIN_EMAIL);
+          if (!adminUser) {
+            await userService.create({
+              email: ADMIN_EMAIL,
+              passwordHash: 'admin@123', // In real app, this should be hashed
+              candidateName: 'Admin User',
+              candidateId: 'ADMIN001',
+              clientName: 'Trajectorie',
+              role: 'Administrator',
+            });
+          }
 
-        // Check and create test candidate
-        const candidateUser = await userService.getByEmail(candidateEmail);
-        if (!candidateUser) {
-          await userService.create({
-            email: candidateEmail,
-            passwordHash: 'p1@123', // In real app, this should be hashed
-            candidateName: 'Test Candidate One',
-            candidateId: 'P1-001',
-            clientName: 'TVS Credit',
-            role: 'Territory Manager',
-          });
-        }
+          // Check and create test candidate
+          const candidateUser = await userService.getByEmail(candidateEmail);
+          if (!candidateUser) {
+            await userService.create({
+              email: candidateEmail,
+              passwordHash: 'p1@123', // In real app, this should be hashed
+              candidateName: 'Test Candidate One',
+              candidateId: 'P1-001',
+              clientName: 'TVS Credit',
+              role: 'Territory Manager',
+            });
+          }
+        };
+        
+        await Promise.race([seedFirestore(), firestoreTimeout]);
       } catch (error) {
         console.error('Error seeding users in Firestore, falling back to localStorage:', error);
         await seedUsersLocalStorage();

@@ -39,7 +39,7 @@ export default function LoginPage() {
   return (
      <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gray-50">
         <div className="text-center mb-8">
-             <Image src="/logo.png" alt="Trajectorie Logo" width={200} height={43} priority />
+             <Image src="/logo.jpg" alt="Trajectorie Logo" width={200} height={43} priority />
         </div>
 
         <Card className="w-full max-w-md animate-fadeIn shadow-lg bg-card border-border text-card-foreground">

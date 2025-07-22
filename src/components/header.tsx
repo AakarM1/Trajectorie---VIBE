@@ -20,7 +20,7 @@ export default function Header() {
             <div className="container flex h-16 max-w-screen-2xl items-center">
                 <div className="flex-none">
                     <Link href="/" className="flex items-center space-x-2">
-                        <Image src="/logo.png" alt="Trajectorie Logo" width={140} height={30} priority />
+                        <Image src="/logo.jpg" alt="Trajectorie Logo" width={140} height={30} priority />
                     </Link>
                 </div>
 
