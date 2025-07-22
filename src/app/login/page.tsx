@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,9 +18,27 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { login } = useAuth();
+  const [shouldRedirect, setShouldRedirect] = useState(false);
+  const { login, user } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
+
+  // Watch for user changes after login and redirect accordingly
+  useEffect(() => {
+    if (shouldRedirect && user) {
+      console.log('👤 User context updated after login:', user);
+      console.log('🔑 User role:', user.role);
+      
+      if (user.role === 'admin' || user.role === 'Administrator') {
+        console.log('🔑 Admin user detected, redirecting to admin dashboard');
+        router.push('/admin');
+      } else {
+        console.log('👤 Regular user detected, redirecting to user dashboard');
+        router.push('/');
+      }
+      setShouldRedirect(false);
+    }
+  }, [user, shouldRedirect, router]);
 
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -28,7 +46,13 @@ export default function LoginPage() {
     
     try {
       const success = await login(email, password);
-      if (!success) {
+      if (success) {
+        toast({
+          title: 'Login Successful',
+          description: 'Welcome back! Redirecting to dashboard...',
+        });
+        setShouldRedirect(true); // Trigger redirect when user context updates
+      } else {
         toast({
           variant: 'destructive',
           title: 'Login Failed',

@@ -78,6 +78,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const seedDefaultUsers = async () => {
     try {
       console.log('🌱 Seeding users in Firestore...');
+      console.log('📡 Testing Firestore connection...');
+      
+      // Test basic Firestore connection first
+      try {
+        const testUsers = await userService.getAll();
+        console.log('✅ Firestore connection successful. Found', testUsers.length, 'existing users');
+      } catch (connectionError) {
+        console.error('❌ Firestore connection failed:', connectionError);
+        return;
+      }
       
       // Check if admin user exists
       const existingAdmin = await userService.getByEmail(ADMIN_EMAIL);
@@ -86,6 +96,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
 
+      console.log('👤 Creating admin user...');
       // Seed admin user
       const adminId = await userService.create({
         email: ADMIN_EMAIL,
@@ -97,7 +108,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
 
       if (adminId) {
-        console.log('✅ Admin user created in Firestore');
+        console.log('✅ Admin user created in Firestore with ID:', adminId);
       }
 
       // Seed 10 test users
@@ -114,10 +125,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         { email: 'candidate10@test.com', name: 'Jack Anderson', id: 'C010', client: 'Digital Dynamics' }
       ];
 
+      console.log('👥 Creating test users...');
       for (const testUser of testUsers) {
         const existing = await userService.getByEmail(testUser.email);
         if (!existing) {
-          await userService.create({
+          const userId = await userService.create({
             email: testUser.email,
             candidateName: testUser.name,
             candidateId: testUser.id,
@@ -125,36 +137,45 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             role: 'candidate',
             passwordHash: 'password123'
           });
+          console.log('👤 Created user:', testUser.email, 'with ID:', userId);
         }
       }
 
       console.log('✅ Seeded Firestore with 1 admin and 10 test users');
     } catch (error) {
-      console.error('Error seeding users in Firestore:', error);
+      console.error('❌ Error seeding users in Firestore:', error);
     }
   };
 
   const login = async (email: string, pass: string): Promise<boolean> => {
     try {
       console.log('🔐 Logging in user via Firestore:', email);
+      console.log('📡 Attempting to connect to Firestore...');
       
       const fsUser = await userService.getByEmail(email);
+      console.log('👤 User lookup result:', fsUser ? 'User found' : 'User not found');
+      
       if (!fsUser) {
         console.log('❌ User not found in Firestore');
         return false;
       }
 
+      console.log('🔑 Checking password for user:', fsUser.email);
+      console.log('🔑 Expected password hash:', fsUser.passwordHash);
+      console.log('🔑 Provided password:', pass);
+      
       if (fsUser.passwordHash !== pass) {
         console.log('❌ Invalid password');
         return false;
       }
 
       const userToStore = convertFirestoreUser(fsUser);
+      console.log('👤 Converting user data:', userToStore);
       setUser(userToStore);
       console.log('✅ User logged in successfully via Firestore');
       return true;
     } catch (error) {
-      console.error('Firestore login error:', error);
+      console.error('❌ Firestore login error:', error);
       return false;
     }
   };
@@ -337,17 +358,25 @@ export const ProtectedRoute = ({ children, adminOnly = false }: ProtectedRoutePr
 
   useEffect(() => {
     if (!loading) {
+      console.log('🔐 ProtectedRoute - checking auth state');
+      console.log('👤 Current user:', user);
+      console.log('🔑 User role:', user?.role);
+      console.log('🚪 Admin only required:', adminOnly);
+      
       if (!user) {
         console.log('🚫 User not authenticated, redirecting to login');
         router.push('/login');
         return;
       }
 
-      if (adminOnly && user.role !== 'admin') {
-        console.log('🚫 User not admin, redirecting to home');
+      if (adminOnly && user.role !== 'admin' && user.role !== 'Administrator') {
+        console.log('🚫 User not admin (role:', user.role, '), redirecting to home');
+        console.log('🚫 Required role: admin or Administrator, actual role:', user.role);
         router.push('/');
         return;
       }
+      
+      console.log('✅ ProtectedRoute - access granted');
     }
   }, [user, loading, router, adminOnly]);
 
@@ -362,7 +391,7 @@ export const ProtectedRoute = ({ children, adminOnly = false }: ProtectedRoutePr
     );
   }
 
-  if (!user || (adminOnly && user.role !== 'admin')) {
+  if (!user || (adminOnly && user.role !== 'admin' && user.role !== 'Administrator')) {
     return null;
   }
 
