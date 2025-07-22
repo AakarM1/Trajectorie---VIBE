@@ -3,7 +3,6 @@ import { Inter, Space_Grotesk, Source_Code_Pro } from 'next/font/google';
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 import { AuthProvider } from '@/contexts/auth-context';
-import StorageNotification from '@/components/storage-notification';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -39,7 +38,6 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} ${sourceCodePro.variable} ${spaceGrotesk.variable}`}>
       <head />
       <body className="font-body antialiased" suppressHydrationWarning={true}>
-        <StorageNotification />
         <AuthProvider>
           <div className="animation-container">
             <div className="blob blob-1" />
