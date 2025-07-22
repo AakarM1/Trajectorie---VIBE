@@ -12,8 +12,7 @@ import { FileCog, PlusCircle, Trash2, ArrowLeft, Settings, Clock, ListOrdered } 
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
 import Header from '@/components/header';
-
-const SJT_CONFIG_KEY = 'sjt-config';
+import { configurationService } from '@/lib/config-service';
 
 const getUniqueId = () => Date.now() + Math.random();
 
@@ -39,11 +38,12 @@ const SJTConfigPage = () => {
 
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedConfig = localStorage.getItem(SJT_CONFIG_KEY);
-      if (savedConfig) {
-        try {
-          const { scenarios: savedScenarios, settings: savedSettings } = JSON.parse(savedConfig);
+    const loadConfiguration = async () => {
+      try {
+        console.log('🔧 Loading SJT configuration from database...');
+        const savedConfig = await configurationService.getSJTConfig();
+        if (savedConfig) {
+          const { scenarios: savedScenarios, settings: savedSettings } = savedConfig;
           if (savedScenarios && savedScenarios.length > 0) {
             setScenarios(savedScenarios);
           } else {
@@ -55,14 +55,17 @@ const SJTConfigPage = () => {
                 numberOfQuestions: savedSettings.numberOfQuestions || 5,
              });
           }
-        } catch (error) {
-           console.error("Failed to parse SJT config", error);
-           setScenarios([{ id: getUniqueId(), situation: '', question: '', bestResponseRationale: '', worstResponseRationale: '', assessedCompetency: '' }]);
+        } else {
+          setScenarios([{ id: getUniqueId(), situation: '', question: '', bestResponseRationale: '', worstResponseRationale: '', assessedCompetency: '' }]);
         }
-      } else {
+        console.log('✅ SJT configuration loaded from database');
+      } catch (error) {
+        console.error('❌ Error loading SJT configuration from database:', error);
         setScenarios([{ id: getUniqueId(), situation: '', question: '', bestResponseRationale: '', worstResponseRationale: '', assessedCompetency: '' }]);
       }
-    }
+    };
+
+    loadConfiguration();
   }, []);
 
   const handleScenarioChange = (id: number, field: keyof Omit<Scenario, 'id'>, value: string) => {
@@ -77,7 +80,7 @@ const SJTConfigPage = () => {
     setScenarios(prev => prev.filter(s => s.id !== id));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (scenarios.some(s => !s.situation || !s.question || !s.bestResponseRationale || !s.worstResponseRationale || !s.assessedCompetency)) {
       toast({
@@ -88,12 +91,24 @@ const SJTConfigPage = () => {
       return;
     }
 
-    if (typeof window !== 'undefined') {
+    try {
       const configToSave = { scenarios, settings };
-      localStorage.setItem(SJT_CONFIG_KEY, JSON.stringify(configToSave));
+      const success = await configurationService.saveSJTConfig(configToSave);
+      
+      if (success) {
+        toast({
+          title: 'Configuration Saved!',
+          description: 'The SJT scenarios and settings have been successfully saved to the database.',
+        });
+      } else {
+        throw new Error('Failed to save configuration');
+      }
+    } catch (error) {
+      console.error('Error saving SJT configuration:', error);
       toast({
-        title: 'Configuration Saved!',
-        description: 'The SJT scenarios and settings have been successfully saved.',
+        variant: 'destructive',
+        title: 'Save Failed',
+        description: 'Failed to save SJT configuration to the database. Please try again.',
       });
     }
   };

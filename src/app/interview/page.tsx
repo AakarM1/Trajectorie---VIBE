@@ -16,8 +16,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-
-const JDT_CONFIG_KEY = 'jdt-config';
+import { configurationService } from '@/lib/config-service';
 const GLOBAL_SETTINGS_KEY = 'global-settings';
 
 
@@ -47,17 +46,18 @@ function VerbalInterviewPage() {
       let questionsToUse: ConversationEntry[] = [];
       let jd = 'A standard role description.';
       
-      if (typeof window !== 'undefined') {
-        const globalSettings = localStorage.getItem(GLOBAL_SETTINGS_KEY);
+      try {
+        // Get global settings from database
+        const globalSettings = await configurationService.getGlobalSettings();
         if (globalSettings) {
-            const parsed = JSON.parse(globalSettings);
-            if (parsed.replyMode) setInterviewMode(parsed.replyMode);
-            if (parsed.showReport !== undefined) setShowReport(parsed.showReport);
+          if (globalSettings.replyMode) setInterviewMode(globalSettings.replyMode);
+          if (globalSettings.showReport !== undefined) setShowReport(globalSettings.showReport);
         }
 
-        const savedConfig = localStorage.getItem(JDT_CONFIG_KEY);
+        // Get JDT configuration from database
+        const savedConfig = await configurationService.getJDTConfig();
         if (savedConfig) {
-          const { roles, settings } = JSON.parse(savedConfig);
+          const { roles, settings } = savedConfig;
           const selectedRole = roles.find((r: any) => r.roleName === details.roleCategory);
 
           if (selectedRole) {
@@ -116,7 +116,15 @@ function VerbalInterviewPage() {
             setTimeLimit(settings.timeLimit);
           }
         }
+      } catch (error) {
+        console.error('Error loading configuration from database:', error);
+        toast({
+          variant: 'destructive',
+          title: 'Configuration Error',
+          description: 'Failed to load configuration from database. Using default settings.',
+        });
       }
+      
       if (questionsToUse.length === 0) {
         toast({
             variant: 'destructive',
