@@ -4,6 +4,7 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 import { AuthProvider } from '@/contexts/auth-context';
 import StorageNotification from '@/components/storage-notification';
+import UserList from '@/components/user-list';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -41,6 +42,7 @@ export default function RootLayout({
       <body className="font-body antialiased" suppressHydrationWarning={true}>
         <StorageNotification />
         <AuthProvider>
+          <UserList />
           <div className="animation-container">
             <div className="blob blob-1" />
             <div className="blob blob-2" />

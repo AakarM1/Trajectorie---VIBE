@@ -103,8 +103,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const seedDefaultUsers = async () => {
-    const candidateEmail = 'p1@gmail.com';
-    
     if (useLocalStorage()) {
       await seedUsersLocalStorage();
     } else {
@@ -115,30 +113,45 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         );
         
         const seedFirestore = async () => {
-          // Check and create admin user
+          // Check if admin already exists
           const adminUser = await userService.getByEmail(ADMIN_EMAIL);
           if (!adminUser) {
+            // Create admin user
             await userService.create({
               email: ADMIN_EMAIL,
               passwordHash: 'admin@123', // In real app, this should be hashed
-              candidateName: 'Admin User',
+              candidateName: 'System Administrator',
               candidateId: 'ADMIN001',
               clientName: 'Trajectorie',
               role: 'Administrator',
             });
-          }
 
-          // Check and create test candidate
-          const candidateUser = await userService.getByEmail(candidateEmail);
-          if (!candidateUser) {
-            await userService.create({
-              email: candidateEmail,
-              passwordHash: 'p1@123', // In real app, this should be hashed
-              candidateName: 'Test Candidate One',
-              candidateId: 'P1-001',
-              clientName: 'TVS Credit',
-              role: 'Territory Manager',
-            });
+            // Create 10 test users
+            const testUsers = [
+              { email: 'test1@gmail.com', name: 'John Smith', id: 'T001', client: 'TechCorp Solutions', role: 'Software Engineer' },
+              { email: 'test2@gmail.com', name: 'Sarah Johnson', id: 'T002', client: 'DataTech Inc', role: 'Data Analyst' },
+              { email: 'test3@gmail.com', name: 'Michael Brown', id: 'T003', client: 'InnovateLabs', role: 'Product Manager' },
+              { email: 'test4@gmail.com', name: 'Emily Davis', id: 'T004', client: 'FinanceFirst', role: 'Financial Analyst' },
+              { email: 'test5@gmail.com', name: 'David Wilson', id: 'T005', client: 'MarketPro', role: 'Marketing Manager' },
+              { email: 'test6@gmail.com', name: 'Lisa Anderson', id: 'T006', client: 'SalesForce Pro', role: 'Sales Representative' },
+              { email: 'test7@gmail.com', name: 'Robert Taylor', id: 'T007', client: 'ConsultCorp', role: 'Business Consultant' },
+              { email: 'test8@gmail.com', name: 'Jennifer Lee', id: 'T008', client: 'HRSolutions', role: 'HR Specialist' },
+              { email: 'test9@gmail.com', name: 'Christopher Garcia', id: 'T009', client: 'OperationsHub', role: 'Operations Manager' },
+              { email: 'test10@gmail.com', name: 'Amanda Martinez', id: 'T010', client: 'DesignStudio', role: 'UX Designer' },
+            ];
+
+            for (const user of testUsers) {
+              await userService.create({
+                email: user.email,
+                passwordHash: 'test123', // In real app, this should be hashed
+                candidateName: user.name,
+                candidateId: user.id,
+                clientName: user.client,
+                role: user.role,
+              });
+            }
+            
+            console.log('✅ Seeded Firestore with 1 admin and 10 test users');
           }
         };
         
@@ -154,42 +167,130 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (typeof window === 'undefined') return;
     
     let users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-    const candidateEmail = 'p1@gmail.com';
     
+    // Check if seeding is already done
     const adminExists = users.some((u: any) => u.email === ADMIN_EMAIL);
-    const candidateExists = users.some((u: any) => u.email === candidateEmail);
+    const hasTestUsers = users.some((u: any) => u.email.includes('test'));
     
-    let updated = false;
-    
-    if (!adminExists) {
-      users.push({
-        id: 'admin-user-seeded',
-        email: ADMIN_EMAIL,
-        password: 'admin@123',
-        candidateName: 'Admin User',
-        candidateId: 'ADMIN001',
-        clientName: 'Trajectorie',
-        role: 'Administrator',
-      });
-      updated = true;
+    if (adminExists && hasTestUsers) {
+      return; // Already seeded
     }
     
-    if (!candidateExists) {
-      users.push({
-        id: 'candidate-user-seeded',
-        email: candidateEmail,
-        password: 'p1@123',
-        candidateName: 'Test Candidate One',
-        candidateId: 'P1-001',
-        clientName: 'TVS Credit',
-        role: 'Territory Manager',
-      });
-      updated = true;
-    }
+    // Clear existing users and seed fresh data
+    users = [];
     
-    if (updated) {
-      localStorage.setItem(USERS_KEY, JSON.stringify(users));
-    }
+    // Add 1 Admin User
+    users.push({
+      id: 'admin-001',
+      email: ADMIN_EMAIL,
+      password: 'admin@123',
+      candidateName: 'System Administrator',
+      candidateId: 'ADMIN001',
+      clientName: 'Trajectorie',
+      role: 'Administrator',
+    });
+    
+    // Add 10 Test Users with diverse profiles
+    const testUsers = [
+      {
+        id: 'test-001',
+        email: 'test1@gmail.com',
+        password: 'test123',
+        candidateName: 'John Smith',
+        candidateId: 'T001',
+        clientName: 'TechCorp Solutions',
+        role: 'Software Engineer',
+      },
+      {
+        id: 'test-002',
+        email: 'test2@gmail.com',
+        password: 'test123',
+        candidateName: 'Sarah Johnson',
+        candidateId: 'T002',
+        clientName: 'DataTech Inc',
+        role: 'Data Analyst',
+      },
+      {
+        id: 'test-003',
+        email: 'test3@gmail.com',
+        password: 'test123',
+        candidateName: 'Michael Brown',
+        candidateId: 'T003',
+        clientName: 'InnovateLabs',
+        role: 'Product Manager',
+      },
+      {
+        id: 'test-004',
+        email: 'test4@gmail.com',
+        password: 'test123',
+        candidateName: 'Emily Davis',
+        candidateId: 'T004',
+        clientName: 'FinanceFirst',
+        role: 'Financial Analyst',
+      },
+      {
+        id: 'test-005',
+        email: 'test5@gmail.com',
+        password: 'test123',
+        candidateName: 'David Wilson',
+        candidateId: 'T005',
+        clientName: 'MarketPro',
+        role: 'Marketing Manager',
+      },
+      {
+        id: 'test-006',
+        email: 'test6@gmail.com',
+        password: 'test123',
+        candidateName: 'Lisa Anderson',
+        candidateId: 'T006',
+        clientName: 'SalesForce Pro',
+        role: 'Sales Representative',
+      },
+      {
+        id: 'test-007',
+        email: 'test7@gmail.com',
+        password: 'test123',
+        candidateName: 'Robert Taylor',
+        candidateId: 'T007',
+        clientName: 'ConsultCorp',
+        role: 'Business Consultant',
+      },
+      {
+        id: 'test-008',
+        email: 'test8@gmail.com',
+        password: 'test123',
+        candidateName: 'Jennifer Lee',
+        candidateId: 'T008',
+        clientName: 'HRSolutions',
+        role: 'HR Specialist',
+      },
+      {
+        id: 'test-009',
+        email: 'test9@gmail.com',
+        password: 'test123',
+        candidateName: 'Christopher Garcia',
+        candidateId: 'T009',
+        clientName: 'OperationsHub',
+        role: 'Operations Manager',
+      },
+      {
+        id: 'test-010',
+        email: 'test10@gmail.com',
+        password: 'test123',
+        candidateName: 'Amanda Martinez',
+        candidateId: 'T010',
+        clientName: 'DesignStudio',
+        role: 'UX Designer',
+      },
+    ];
+    
+    // Add all test users
+    users.push(...testUsers);
+    
+    // Save to localStorage
+    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    
+    console.log('✅ Seeded localStorage with 1 admin and 10 test users');
   };
 
   const login = async (email: string, pass: string): Promise<boolean> => {
