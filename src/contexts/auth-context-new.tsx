@@ -47,13 +47,11 @@ const SESSION_KEY = 'verbal-insights-session';
 const SUBMISSIONS_KEY = 'verbal-insights-submissions';
 const ADMIN_EMAIL = 'admin@gmail.com';
 
-// Check if we're in browser environment and if Firestore is available
-const isFirestoreAvailable = () => {
+// Check if we should use Firestore (now primary) or fallback to localStorage
+const useFirestore = () => {
+  // Always try to use Firestore unless explicitly disabled
   return typeof window !== 'undefined' && 
-         process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID !== 'demo-app' &&
-         process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== 'demo-key' &&
-         process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID &&
-         process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+         process.env.NEXT_PUBLIC_USE_LOCALSTORAGE !== 'true';
 };
 
 const getInitialUser = (): User | null => {
@@ -95,7 +93,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const seedDefaultUsers = async () => {
     const candidateEmail = 'p1@gmail.com';
     
-    if (isFirestoreAvailable()) {
+    if (useFirestore()) {
       try {
         // Check and create admin user
         const adminUser = await userService.getByEmail(ADMIN_EMAIL);
