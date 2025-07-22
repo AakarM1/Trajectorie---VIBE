@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import type { Submission } from '@/types';
 import { 
@@ -10,7 +10,6 @@ import {
   convertFirestoreSubmission,
   type FirestoreUser 
 } from '@/lib/database';
-import { getStorageConfig } from '@/lib/storage-config';
 
 // Define the user type
 interface User {
@@ -42,29 +41,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Fallback keys for localStorage (when Firestore is unavailable)
-const USERS_KEY = 'verbal-insights-users';
-const SESSION_KEY = 'verbal-insights-session';
-const SUBMISSIONS_KEY = 'verbal-insights-submissions';
 const ADMIN_EMAIL = 'admin@gmail.com';
-
-// Check if we should use localStorage instead of Firestore
-const useLocalStorage = () => {
-  const { useFirestore } = getStorageConfig();
-  const shouldUseLocal = !useFirestore;
-  if (shouldUseLocal) {
-    console.log('�️ Using LOCAL STORAGE mode');
-  } else {
-    console.log('� Using FIRESTORE mode');
-  }
-  return shouldUseLocal;
-};
-
-const getInitialUser = (): User | null => {
-  if (typeof window === 'undefined') return null;
-  const session = localStorage.getItem(SESSION_KEY);
-  return session ? JSON.parse(session) : null;
-};
 
 // Convert Firestore user to regular user
 const convertFirestoreUser = (fsUser: FirestoreUser): User => {
@@ -79,7 +56,6 @@ const convertFirestoreUser = (fsUser: FirestoreUser): User => {
 };
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  // Always start with null to ensure server and client match
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
@@ -87,513 +63,256 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        // Only access localStorage after component mounts (client-side only)
-        const storedUser = getInitialUser();
-        setUser(storedUser);
-        
-        // Seed default users with timeout to prevent hanging
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout')), 5000)
-        );
-        
-        await Promise.race([seedDefaultUsers(), timeoutPromise]);
+        console.log('🔥 Initializing auth with database-only mode');
+        await seedDefaultUsers();
       } catch (error) {
-        console.error('Error initializing auth:', error);
-        // Continue anyway - don't let seeding block the app
+        console.error('Auth initialization error:', error);
       } finally {
         setLoading(false);
       }
     };
-    
+
     initializeAuth();
   }, []);
 
   const seedDefaultUsers = async () => {
-    if (useLocalStorage()) {
-      await seedUsersLocalStorage();
-    } else {
-      try {
-        // Add a quick timeout for Firestore operations
-        const firestoreTimeout = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Firestore timeout')), 3000)
-        );
-        
-        const seedFirestore = async () => {
-          // Check if admin already exists
-          const adminUser = await userService.getByEmail(ADMIN_EMAIL);
-          if (!adminUser) {
-            // Create admin user
-            await userService.create({
-              email: ADMIN_EMAIL,
-              passwordHash: 'admin@123', // In real app, this should be hashed
-              candidateName: 'System Administrator',
-              candidateId: 'ADMIN001',
-              clientName: 'Trajectorie',
-              role: 'Administrator',
-            });
-
-            // Create 10 test users
-            const testUsers = [
-              { email: 'test1@gmail.com', name: 'John Smith', id: 'T001', client: 'TechCorp Solutions', role: 'Software Engineer' },
-              { email: 'test2@gmail.com', name: 'Sarah Johnson', id: 'T002', client: 'DataTech Inc', role: 'Data Analyst' },
-              { email: 'test3@gmail.com', name: 'Michael Brown', id: 'T003', client: 'InnovateLabs', role: 'Product Manager' },
-              { email: 'test4@gmail.com', name: 'Emily Davis', id: 'T004', client: 'FinanceFirst', role: 'Financial Analyst' },
-              { email: 'test5@gmail.com', name: 'David Wilson', id: 'T005', client: 'MarketPro', role: 'Marketing Manager' },
-              { email: 'test6@gmail.com', name: 'Lisa Anderson', id: 'T006', client: 'SalesForce Pro', role: 'Sales Representative' },
-              { email: 'test7@gmail.com', name: 'Robert Taylor', id: 'T007', client: 'ConsultCorp', role: 'Business Consultant' },
-              { email: 'test8@gmail.com', name: 'Jennifer Lee', id: 'T008', client: 'HRSolutions', role: 'HR Specialist' },
-              { email: 'test9@gmail.com', name: 'Christopher Garcia', id: 'T009', client: 'OperationsHub', role: 'Operations Manager' },
-              { email: 'test10@gmail.com', name: 'Amanda Martinez', id: 'T010', client: 'DesignStudio', role: 'UX Designer' },
-            ];
-
-            for (const user of testUsers) {
-              await userService.create({
-                email: user.email,
-                passwordHash: 'test123', // In real app, this should be hashed
-                candidateName: user.name,
-                candidateId: user.id,
-                clientName: user.client,
-                role: user.role,
-              });
-            }
-            
-            console.log('✅ Seeded Firestore with 1 admin and 10 test users');
-          }
-        };
-        
-        await Promise.race([seedFirestore(), firestoreTimeout]);
-      } catch (error) {
-        console.error('Error seeding users in Firestore, falling back to localStorage:', error);
-        await seedUsersLocalStorage();
+    try {
+      console.log('🌱 Seeding users in Firestore...');
+      
+      // Check if admin user exists
+      const existingAdmin = await userService.getByEmail(ADMIN_EMAIL);
+      if (existingAdmin) {
+        console.log('✅ Admin user already exists in Firestore');
+        return;
       }
-    }
-  };
 
-  const seedUsersLocalStorage = async () => {
-    if (typeof window === 'undefined') return;
-    
-    let users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-    
-    // Check if seeding is already done
-    const adminExists = users.some((u: any) => u.email === ADMIN_EMAIL);
-    const hasTestUsers = users.some((u: any) => u.email.includes('test'));
-    
-    if (adminExists && hasTestUsers) {
-      return; // Already seeded
+      // Seed admin user
+      const adminId = await userService.create({
+        email: ADMIN_EMAIL,
+        candidateName: 'Admin User',
+        candidateId: 'ADMIN001',
+        clientName: 'System',
+        role: 'admin',
+        passwordHash: 'admin123'
+      });
+
+      if (adminId) {
+        console.log('✅ Admin user created in Firestore');
+      }
+
+      // Seed 10 test users
+      const testUsers = [
+        { email: 'candidate1@test.com', name: 'Alice Johnson', id: 'C001', client: 'TechCorp' },
+        { email: 'candidate2@test.com', name: 'Bob Smith', id: 'C002', client: 'InnovateCo' },
+        { email: 'candidate3@test.com', name: 'Carol Davis', id: 'C003', client: 'StartupXYZ' },
+        { email: 'candidate4@test.com', name: 'David Wilson', id: 'C004', client: 'MegaCorp' },
+        { email: 'candidate5@test.com', name: 'Eve Brown', id: 'C005', client: 'SmallBiz' },
+        { email: 'candidate6@test.com', name: 'Frank Miller', id: 'C006', client: 'Enterprise Ltd' },
+        { email: 'candidate7@test.com', name: 'Grace Lee', id: 'C007', client: 'Innovation Hub' },
+        { email: 'candidate8@test.com', name: 'Henry Taylor', id: 'C008', client: 'Future Tech' },
+        { email: 'candidate9@test.com', name: 'Iris Chen', id: 'C009', client: 'Global Solutions' },
+        { email: 'candidate10@test.com', name: 'Jack Anderson', id: 'C010', client: 'Digital Dynamics' }
+      ];
+
+      for (const testUser of testUsers) {
+        const existing = await userService.getByEmail(testUser.email);
+        if (!existing) {
+          await userService.create({
+            email: testUser.email,
+            candidateName: testUser.name,
+            candidateId: testUser.id,
+            clientName: testUser.client,
+            role: 'candidate',
+            passwordHash: 'password123'
+          });
+        }
+      }
+
+      console.log('✅ Seeded Firestore with 1 admin and 10 test users');
+    } catch (error) {
+      console.error('Error seeding users in Firestore:', error);
     }
-    
-    // Clear existing users and seed fresh data
-    users = [];
-    
-    // Add 1 Admin User
-    users.push({
-      id: 'admin-001',
-      email: ADMIN_EMAIL,
-      password: 'admin@123',
-      candidateName: 'System Administrator',
-      candidateId: 'ADMIN001',
-      clientName: 'Trajectorie',
-      role: 'Administrator',
-    });
-    
-    // Add 10 Test Users with diverse profiles
-    const testUsers = [
-      {
-        id: 'test-001',
-        email: 'test1@gmail.com',
-        password: 'test123',
-        candidateName: 'John Smith',
-        candidateId: 'T001',
-        clientName: 'TechCorp Solutions',
-        role: 'Software Engineer',
-      },
-      {
-        id: 'test-002',
-        email: 'test2@gmail.com',
-        password: 'test123',
-        candidateName: 'Sarah Johnson',
-        candidateId: 'T002',
-        clientName: 'DataTech Inc',
-        role: 'Data Analyst',
-      },
-      {
-        id: 'test-003',
-        email: 'test3@gmail.com',
-        password: 'test123',
-        candidateName: 'Michael Brown',
-        candidateId: 'T003',
-        clientName: 'InnovateLabs',
-        role: 'Product Manager',
-      },
-      {
-        id: 'test-004',
-        email: 'test4@gmail.com',
-        password: 'test123',
-        candidateName: 'Emily Davis',
-        candidateId: 'T004',
-        clientName: 'FinanceFirst',
-        role: 'Financial Analyst',
-      },
-      {
-        id: 'test-005',
-        email: 'test5@gmail.com',
-        password: 'test123',
-        candidateName: 'David Wilson',
-        candidateId: 'T005',
-        clientName: 'MarketPro',
-        role: 'Marketing Manager',
-      },
-      {
-        id: 'test-006',
-        email: 'test6@gmail.com',
-        password: 'test123',
-        candidateName: 'Lisa Anderson',
-        candidateId: 'T006',
-        clientName: 'SalesForce Pro',
-        role: 'Sales Representative',
-      },
-      {
-        id: 'test-007',
-        email: 'test7@gmail.com',
-        password: 'test123',
-        candidateName: 'Robert Taylor',
-        candidateId: 'T007',
-        clientName: 'ConsultCorp',
-        role: 'Business Consultant',
-      },
-      {
-        id: 'test-008',
-        email: 'test8@gmail.com',
-        password: 'test123',
-        candidateName: 'Jennifer Lee',
-        candidateId: 'T008',
-        clientName: 'HRSolutions',
-        role: 'HR Specialist',
-      },
-      {
-        id: 'test-009',
-        email: 'test9@gmail.com',
-        password: 'test123',
-        candidateName: 'Christopher Garcia',
-        candidateId: 'T009',
-        clientName: 'OperationsHub',
-        role: 'Operations Manager',
-      },
-      {
-        id: 'test-010',
-        email: 'test10@gmail.com',
-        password: 'test123',
-        candidateName: 'Amanda Martinez',
-        candidateId: 'T010',
-        clientName: 'DesignStudio',
-        role: 'UX Designer',
-      },
-    ];
-    
-    // Add all test users
-    users.push(...testUsers);
-    
-    // Save to localStorage
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-    
-    console.log('✅ Seeded localStorage with 1 admin and 10 test users');
   };
 
   const login = async (email: string, pass: string): Promise<boolean> => {
-    if (useLocalStorage()) {
-      return loginLocalStorage(email, pass);
-    }
-
     try {
-      const foundUser = await userService.getByEmail(email);
-      if (foundUser && foundUser.passwordHash === pass) { // In real app, compare hashed passwords
-        const userToStore = convertFirestoreUser(foundUser);
-        localStorage.setItem(SESSION_KEY, JSON.stringify(userToStore));
-        setUser(userToStore);
-        
-        if (userToStore.email === ADMIN_EMAIL) {
-          router.push('/admin');
-        } else {
-          router.push('/');
-        }
+      console.log('🔐 Logging in user via Firestore:', email);
+      
+      const fsUser = await userService.getByEmail(email);
+      if (!fsUser) {
+        console.log('❌ User not found in Firestore');
+        return false;
+      }
+
+      if (fsUser.passwordHash !== pass) {
+        console.log('❌ Invalid password');
+        return false;
+      }
+
+      const userToStore = convertFirestoreUser(fsUser);
+      setUser(userToStore);
+      console.log('✅ User logged in successfully via Firestore');
+      return true;
+    } catch (error) {
+      console.error('Firestore login error:', error);
+      return false;
+    }
+  };
+
+  const register = async (details: Omit<User, 'id'> & {password: string}): Promise<boolean> => {
+    try {
+      console.log('📝 Registering new user in Firestore:', details.email);
+      
+      const existingUser = await userService.getByEmail(details.email);
+      if (existingUser) {
+        console.log('❌ User already exists in Firestore');
+        return false;
+      }
+
+      const userId = await userService.create({
+        email: details.email,
+        candidateName: details.candidateName,
+        candidateId: details.candidateId,
+        clientName: details.clientName,
+        role: details.role,
+        passwordHash: details.password
+      });
+
+      if (userId) {
+        console.log('✅ User registered successfully in Firestore');
         return true;
       }
       return false;
     } catch (error) {
-      console.error('Firestore login error, falling back to localStorage:', error);
-      return loginLocalStorage(email, pass);
+      console.error('Firestore registration error:', error);
+      return false;
     }
-  };
-
-  const loginLocalStorage = (email: string, pass: string): boolean => {
-    const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-    const foundUser = users.find((u: any) => u.email === email && u.password === pass);
-    
-    if (foundUser) {
-      const { password, ...userToStore } = foundUser;
-      localStorage.setItem(SESSION_KEY, JSON.stringify(userToStore));
-      setUser(userToStore);
-      
-      if (userToStore.email === ADMIN_EMAIL) {
-        router.push('/admin');
-      } else {
-        router.push('/');
-      }
-      return true;
-    }
-    return false;
-  };
-
-  const register = async (details: Omit<User, 'id'> & {password: string}): Promise<boolean> => {
-    if (useLocalStorage()) {
-      return registerLocalStorage(details);
-    }
-
-    try {
-      const existing = await userService.getByEmail(details.email);
-      if (existing) return false;
-      
-      const userId = await userService.create({
-        email: details.email,
-        passwordHash: details.password, // In real app, hash this
-        candidateName: details.candidateName,
-        candidateId: details.candidateId,
-        clientName: details.clientName,
-        role: details.role
-      });
-      
-      return userId !== null;
-    } catch (error) {
-      console.error('Firestore register error, falling back to localStorage:', error);
-      return registerLocalStorage(details);
-    }
-  };
-
-  const registerLocalStorage = (details: Omit<User, 'id'> & {password: string}): boolean => {
-    const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-    const existing = users.find((u: any) => u.email === details.email);
-    if (existing) return false;
-    
-    const newUser = { ...details, id: new Date().toISOString() };
-    users.push(newUser);
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-    return true;
   };
 
   const logout = () => {
-    localStorage.removeItem(SESSION_KEY);
+    console.log('🚪 Logging out user');
     setUser(null);
-    router.push('/login');
   };
 
   const saveSubmission = async (submission: Omit<Submission, 'id' | 'date'>) => {
-    if (useLocalStorage()) {
-      // Fallback to localStorage
-      if (typeof window === 'undefined') return;
-      try {
-        const submissions = JSON.parse(localStorage.getItem(SUBMISSIONS_KEY) || '[]');
-        const newSubmission: Submission = {
-          ...submission,
-          id: `sub_${new Date().getTime()}_${Math.random().toString(36).substring(2, 9)}`,
-          date: new Date().toISOString(),
-        };
-        submissions.push(newSubmission);
-        localStorage.setItem(SUBMISSIONS_KEY, JSON.stringify(submissions));
-      } catch (error) {
-        console.error('Error saving submission to localStorage:', error);
-      }
-      return;
-    }
-
     try {
+      console.log('💾 Saving submission to Firestore');
       await submissionService.create(submission);
+      console.log('✅ Submission saved successfully to Firestore');
     } catch (error) {
-      console.error('Firestore saveSubmission error, falling back to localStorage:', error);
-      // Fallback to localStorage
-      if (typeof window === 'undefined') return;
-      try {
-        const submissions = JSON.parse(localStorage.getItem(SUBMISSIONS_KEY) || '[]');
-        const newSubmission: Submission = {
-          ...submission,
-          id: `sub_${new Date().getTime()}_${Math.random().toString(36).substring(2, 9)}`,
-          date: new Date().toISOString(),
-        };
-        submissions.push(newSubmission);
-        localStorage.setItem(SUBMISSIONS_KEY, JSON.stringify(submissions));
-      } catch (error) {
-        console.error('Error saving submission to localStorage:', error);
-      }
+      console.error('❌ Error saving submission to Firestore:', error);
+      throw error;
     }
   };
 
   const getSubmissions = async (): Promise<Submission[]> => {
-    if (useLocalStorage()) {
-      // Use localStorage
-      if (typeof window === 'undefined') return [];
-      const data = localStorage.getItem(SUBMISSIONS_KEY);
-      return data ? JSON.parse(data) : [];
-    }
-
     try {
-      const firestoreSubmissions = await submissionService.getAll();
-      return firestoreSubmissions.map(convertFirestoreSubmission);
+      console.log('📖 Fetching submissions from Firestore');
+      const fsSubmissions = await submissionService.getAll();
+      const submissions = fsSubmissions.map(convertFirestoreSubmission);
+      console.log(`✅ Fetched ${submissions.length} submissions from Firestore`);
+      return submissions;
     } catch (error) {
-      console.error('Firestore getSubmissions error, falling back to localStorage:', error);
-      // Fallback to localStorage
-      if (typeof window === 'undefined') return [];
-      const data = localStorage.getItem(SUBMISSIONS_KEY);
-      return data ? JSON.parse(data) : [];
+      console.error('❌ Error fetching submissions from Firestore:', error);
+      return [];
     }
   };
 
   const getSubmissionById = async (id: string): Promise<Submission | null> => {
-    if (useLocalStorage()) {
-      const submissions = await getSubmissions();
-      return submissions.find(s => s.id === id) || null;
-    }
-
     try {
-      const firestoreSubmission = await submissionService.getById(id);
-      return firestoreSubmission ? convertFirestoreSubmission(firestoreSubmission) : null;
+      console.log('📖 Fetching submission by ID from Firestore:', id);
+      const fsSubmission = await submissionService.getById(id);
+      if (!fsSubmission) {
+        console.log('❌ Submission not found in Firestore');
+        return null;
+      }
+      const submission = convertFirestoreSubmission(fsSubmission);
+      console.log('✅ Submission fetched from Firestore');
+      return submission;
     } catch (error) {
-      console.error('Firestore getSubmissionById error, falling back to localStorage:', error);
-      const submissions = await getSubmissions();
-      return submissions.find(s => s.id === id) || null;
+      console.error('❌ Error fetching submission from Firestore:', error);
+      return null;
     }
   };
 
-  const deleteSubmission = async (id: string) => {
-    if (useLocalStorage()) {
-      if (typeof window === 'undefined') return;
-      const submissions = await getSubmissions();
-      const filtered = submissions.filter(s => s.id !== id);
-      localStorage.setItem(SUBMISSIONS_KEY, JSON.stringify(filtered));
-      return;
-    }
-
+  const deleteSubmission = async (id: string): Promise<void> => {
     try {
+      console.log('🗑️ Deleting submission from Firestore:', id);
       await submissionService.delete(id);
+      console.log('✅ Submission deleted from Firestore');
     } catch (error) {
-      console.error('Firestore deleteSubmission error, falling back to localStorage:', error);
-      if (typeof window === 'undefined') return;
-      const submissions = await getSubmissions();
-      const filtered = submissions.filter(s => s.id !== id);
-      localStorage.setItem(SUBMISSIONS_KEY, JSON.stringify(filtered));
+      console.error('❌ Error deleting submission from Firestore:', error);
+      throw error;
     }
   };
 
-  const clearAllSubmissions = async () => {
-    if (useLocalStorage()) {
-      if (typeof window === 'undefined') return;
-      localStorage.removeItem(SUBMISSIONS_KEY);
-      return;
-    }
-
+  const clearAllSubmissions = async (): Promise<void> => {
     try {
+      console.log('🗑️ Clearing all submissions from Firestore');
       const submissions = await submissionService.getAll();
-      await Promise.all(submissions.map(s => submissionService.delete(s.id)));
+      for (const submission of submissions) {
+        await submissionService.delete(submission.id);
+      }
+      console.log('✅ All submissions cleared from Firestore');
     } catch (error) {
-      console.error('Firestore clearAllSubmissions error, falling back to localStorage:', error);
-      if (typeof window === 'undefined') return;
-      localStorage.removeItem(SUBMISSIONS_KEY);
+      console.error('❌ Error clearing submissions from Firestore:', error);
+      throw error;
     }
   };
 
   const getUsers = async (): Promise<User[]> => {
-    if (useLocalStorage()) {
-      if (typeof window === 'undefined') return [];
-      const data = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-      return data.map((u: any) => { const {password, ...user} = u; return user; });
-    }
-
     try {
-      const firestoreUsers = await userService.getAll();
-      return firestoreUsers.map(convertFirestoreUser);
+      console.log('👥 Fetching users from Firestore');
+      const fsUsers = await userService.getAll();
+      const users = fsUsers.map(convertFirestoreUser);
+      console.log(`✅ Fetched ${users.length} users from Firestore`);
+      return users;
     } catch (error) {
-      console.error('Firestore getUsers error, falling back to localStorage:', error);
-      if (typeof window === 'undefined') return [];
-      const data = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-      return data.map((u: any) => { const {password, ...user} = u; return user; });
+      console.error('❌ Error fetching users from Firestore:', error);
+      return [];
     }
   };
 
-  const deleteUser = async (userId: string) => {
-    if (useLocalStorage()) {
-      if (typeof window === 'undefined') return;
-      let users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-      users = users.filter((u: User) => u.id !== userId);
-      localStorage.setItem(USERS_KEY, JSON.stringify(users));
-      return;
-    }
-
+  const deleteUser = async (userId: string): Promise<void> => {
     try {
+      console.log('🗑️ Deleting user from Firestore:', userId);
       await userService.delete(userId);
+      console.log('✅ User deleted from Firestore');
     } catch (error) {
-      console.error('Firestore deleteUser error, falling back to localStorage:', error);
-      if (typeof window === 'undefined') return;
-      let users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-      users = users.filter((u: User) => u.id !== userId);
-      localStorage.setItem(USERS_KEY, JSON.stringify(users));
+      console.error('❌ Error deleting user from Firestore:', error);
+      throw error;
     }
   };
 
-  const updateUser = async (userId: string, updates: Partial<User>) => {
-    if (useLocalStorage()) {
-      if (typeof window === 'undefined') return;
-      let users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-      users = users.map((u: User) => u.id === userId ? { ...u, ...updates } : u);
-      localStorage.setItem(USERS_KEY, JSON.stringify(users));
-      
-      // Update local session if it's the current user
-      if (user && user.id === userId) {
-        const updatedUser = { ...user, ...updates };
-        setUser(updatedUser);
-        localStorage.setItem(SESSION_KEY, JSON.stringify(updatedUser));
-      }
-      return;
-    }
-
+  const updateUser = async (userId: string, updates: Partial<User>): Promise<void> => {
     try {
+      console.log('📝 Updating user in Firestore:', userId);
       await userService.update(userId, updates);
-      
-      // Update local session if it's the current user
-      if (user && user.id === userId) {
-        const updatedUser = { ...user, ...updates };
-        setUser(updatedUser);
-        localStorage.setItem(SESSION_KEY, JSON.stringify(updatedUser));
-      }
+      console.log('✅ User updated in Firestore');
     } catch (error) {
-      console.error('Firestore updateUser error, falling back to localStorage:', error);
-      if (typeof window === 'undefined') return;
-      let users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-      users = users.map((u: User) => u.id === userId ? { ...u, ...updates } : u);
-      localStorage.setItem(USERS_KEY, JSON.stringify(users));
-      
-      // Update local session if it's the current user
-      if (user && user.id === userId) {
-        const updatedUser = { ...user, ...updates };
-        setUser(updatedUser);
-        localStorage.setItem(SESSION_KEY, JSON.stringify(updatedUser));
-      }
+      console.error('❌ Error updating user in Firestore:', error);
+      throw error;
     }
+  };
+
+  const value: AuthContextType = {
+    user,
+    login,
+    logout,
+    register,
+    loading,
+    saveSubmission,
+    getSubmissions,
+    getSubmissionById,
+    deleteSubmission,
+    clearAllSubmissions,
+    getUsers,
+    deleteUser,
+    updateUser
   };
 
   return (
-    <AuthContext.Provider value={{
-      user,
-      login,
-      logout,
-      register,
-      loading,
-      saveSubmission,
-      getSubmissions,
-      getSubmissionById,
-      deleteSubmission,
-      clearAllSubmissions,
-      getUsers,
-      deleteUser,
-      updateUser
-    }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
@@ -607,45 +326,44 @@ export const useAuth = () => {
   return context;
 };
 
-// Protected route component
-export const ProtectedRoute = ({ children, adminOnly = false }: { children: ReactNode; adminOnly?: boolean }) => {
+interface ProtectedRouteProps {
+  children: ReactNode;
+  adminOnly?: boolean;
+}
+
+export const ProtectedRoute = ({ children, adminOnly = false }: ProtectedRouteProps) => {
   const { user, loading } = useAuth();
-  const pathname = usePathname();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && !user && pathname !== '/login' && pathname !== '/register') {
-      router.push('/login');
+    if (!loading) {
+      if (!user) {
+        console.log('🚫 User not authenticated, redirecting to login');
+        router.push('/login');
+        return;
+      }
+
+      if (adminOnly && user.role !== 'admin') {
+        console.log('🚫 User not admin, redirecting to home');
+        router.push('/');
+        return;
+      }
     }
-    
-    // Check admin access if adminOnly is true
-    if (!loading && user && adminOnly && user.role !== 'Administrator' && user.email !== 'admin@gmail.com') {
-      router.push('/'); // Redirect non-admin users to home
-    }
-  }, [user, loading, pathname, router, adminOnly]);
+  }, [user, loading, router, adminOnly]);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    );
-  }
-
-  if (!user && pathname !== '/login' && pathname !== '/register') {
-    return null;
-  }
-
-  // Check admin access for admin-only routes
-  if (user && adminOnly && user.role !== 'Administrator' && user.email !== 'admin@gmail.com') {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-red-600 mb-4">Access Denied</h1>
-          <p className="text-gray-600">You don't have permission to access this page.</p>
+          <Loader2 className="mx-auto h-8 w-8 animate-spin text-indigo-600 mb-4" />
+          <p className="text-gray-600">Loading...</p>
         </div>
       </div>
     );
+  }
+
+  if (!user || (adminOnly && user.role !== 'admin')) {
+    return null;
   }
 
   return <>{children}</>;

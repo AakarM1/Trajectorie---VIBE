@@ -13,8 +13,7 @@ import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
 import Header from '@/components/header';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-
-const JDT_CONFIG_KEY = 'jdt-config';
+import { configurationService } from '@/lib/config-service';
 
 const getUniqueId = () => Date.now() + Math.random();
 
@@ -59,11 +58,12 @@ const JDConfigPage = () => {
 
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedConfig = localStorage.getItem(JDT_CONFIG_KEY);
-      if (savedConfig) {
-        try {
-          const { roles: savedRoles, settings: savedSettings } = JSON.parse(savedConfig);
+    const loadConfiguration = async () => {
+      try {
+        console.log('🔧 Loading JDT configuration from database...');
+        const savedConfig = await configurationService.getJDTConfig();
+        if (savedConfig) {
+          const { roles: savedRoles, settings: savedSettings } = savedConfig;
           if (savedRoles && savedRoles.length > 0) {
             setRoles(savedRoles);
             setCurrentRoleId(savedRoles[0].id);
@@ -77,14 +77,17 @@ const JDConfigPage = () => {
                 aiGeneratedQuestions: savedSettings.aiGeneratedQuestions || 0,
             });
           }
-        } catch (error) {
-          console.error("Failed to parse JDT config from localStorage", error);
+        } else {
           addRole();
         }
-      } else {
+        console.log('✅ JDT configuration loaded from database');
+      } catch (error) {
+        console.error('❌ Error loading JDT configuration from database:', error);
         addRole();
       }
-    }
+    };
+
+    loadConfiguration();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -139,7 +142,7 @@ const JDConfigPage = () => {
     });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (roles.some(r => !r.roleName || !r.jobDescription || r.questions.some(q => !q.text || !q.preferredAnswer || !q.competency))) {
       toast({
@@ -150,12 +153,24 @@ const JDConfigPage = () => {
       return;
     }
 
-    if (typeof window !== 'undefined') {
+    try {
       const configToSave = { roles, settings };
-      localStorage.setItem(JDT_CONFIG_KEY, JSON.stringify(configToSave));
+      const success = await configurationService.saveJDTConfig(configToSave);
+      
+      if (success) {
+        toast({
+          title: 'Configuration Saved!',
+          description: 'The Job Description Based interview configuration has been successfully saved to the database.',
+        });
+      } else {
+        throw new Error('Failed to save configuration');
+      }
+    } catch (error) {
+      console.error('Error saving JDT configuration:', error);
       toast({
-        title: 'Configuration Saved!',
-        description: 'The Job Description Based interview configuration has been successfully saved.',
+        variant: 'destructive',
+        title: 'Save Failed',
+        description: 'Failed to save JDT configuration to the database. Please try again.',
       });
     }
   };

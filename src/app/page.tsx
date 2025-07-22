@@ -7,6 +7,7 @@ import { ProtectedRoute, useAuth } from '@/contexts/auth-context';
 import Header from '@/components/header';
 import Image from 'next/image';
 import { ArrowRightCircle, Headphones, ListChecks, Info, FileText, Briefcase } from 'lucide-react';
+import { configurationService } from '@/lib/config-service';
 
 const Stepper = () => (
   <div className="w-full max-w-4xl mx-auto my-12">
@@ -85,21 +86,31 @@ function SelectionPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const globalSettings = localStorage.getItem('global-settings');
-      if (globalSettings) {
-        const parsed = JSON.parse(globalSettings);
-        setIsJdtEnabled(parsed.isJdtEnabled ?? true);
-        setIsSjtEnabled(parsed.isSjtEnabled ?? true);
+    const loadConfiguration = async () => {
+      try {
+        console.log('🔧 Loading configuration from database...');
+        
+        const globalSettings = await configurationService.getGlobalSettings();
+        if (globalSettings) {
+          setIsJdtEnabled(globalSettings.isJdtEnabled ?? true);
+          setIsSjtEnabled(globalSettings.isSjtEnabled ?? true);
+        }
+        
+        const jdtConfig = await configurationService.getJDTConfig();
+        const sjtConfig = await configurationService.getSJTConfig();
+        
+        setIsJdtConfigured(!!jdtConfig);
+        setIsSjtConfigured(!!sjtConfig);
+        
+        console.log('✅ Configuration loaded from database');
+      } catch (error) {
+        console.error('❌ Error loading configuration from database:', error);
+      } finally {
+        setLoading(false);
       }
-      
-      const jdtConfig = localStorage.getItem('jdt-config');
-      const sjtConfig = localStorage.getItem('sjt-config');
-      setIsJdtConfigured(!!jdtConfig);
-      setIsSjtConfigured(!!sjtConfig);
-      
-      setLoading(false);
-    }
+    };
+
+    loadConfiguration();
   }, []);
 
   const showJDT = isJdtEnabled && isJdtConfigured;

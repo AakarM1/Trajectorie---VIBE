@@ -15,9 +15,7 @@ import { SJTInstructions } from '@/components/sjt/sjt-instructions';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-
-const SJT_CONFIG_KEY = 'sjt-config';
-const GLOBAL_SETTINGS_KEY = 'global-settings';
+import { configurationService } from '@/lib/config-service';
 
 
 interface Scenario {
@@ -75,34 +73,38 @@ function SJTInterviewPage() {
 
     let scenariosToUse = fallbackSjtScenarios;
 
-    if (typeof window !== 'undefined') {
-      const globalSettings = localStorage.getItem(GLOBAL_SETTINGS_KEY);
+    try {
+      // Get global settings from database
+      const globalSettings = await configurationService.getGlobalSettings();
       if (globalSettings) {
-          const parsed = JSON.parse(globalSettings);
-          if (parsed.replyMode) setInterviewMode(parsed.replyMode);
-          if (parsed.showReport !== undefined) setShowReport(parsed.showReport);
+        if (globalSettings.replyMode) setInterviewMode(globalSettings.replyMode);
+        if (globalSettings.showReport !== undefined) setShowReport(globalSettings.showReport);
       }
       
-      const savedConfig = localStorage.getItem(SJT_CONFIG_KEY);
+      // Get SJT configuration from database
+      const savedConfig = await configurationService.getSJTConfig();
       if (savedConfig) {
-        try {
-          const { scenarios, settings } = JSON.parse(savedConfig);
-          if (scenarios && scenarios.length > 0) {
-            let allScenarios = scenarios;
-            const numQuestionsToUse = settings?.numberOfQuestions > 0 ? settings.numberOfQuestions : allScenarios.length;
-            
-            if (numQuestionsToUse < allScenarios.length) {
-              allScenarios.sort(() => 0.5 - Math.random());
-            }
-            scenariosToUse = allScenarios.slice(0, numQuestionsToUse);
+        const { scenarios, settings } = savedConfig;
+        if (scenarios && scenarios.length > 0) {
+          let allScenarios = scenarios;
+          const numQuestionsToUse = settings?.numberOfQuestions > 0 ? settings.numberOfQuestions : allScenarios.length;
+          
+          if (numQuestionsToUse < allScenarios.length) {
+            allScenarios.sort(() => 0.5 - Math.random());
           }
-           if (settings?.timeLimit) {
-            setTimeLimit(settings.timeLimit);
-          }
-        } catch (error) {
-          console.error("Failed to parse SJT config, using fallback.", error);
+          scenariosToUse = allScenarios.slice(0, numQuestionsToUse);
+        }
+        if (settings?.timeLimit) {
+          setTimeLimit(settings.timeLimit);
         }
       }
+    } catch (error) {
+      console.error('Error loading configuration from database:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Configuration Error',
+        description: 'Failed to load configuration from database. Using fallback scenarios.',
+      });
     }
     
     // Translate scenarios if language is not English

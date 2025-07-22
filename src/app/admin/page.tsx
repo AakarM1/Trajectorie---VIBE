@@ -14,9 +14,7 @@ import type { InterviewMode } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
-
-
-const GLOBAL_SETTINGS_KEY = 'global-settings';
+import { configurationService } from '@/lib/config-service';
 
 interface GlobalSettings {
     replyMode: InterviewMode;
@@ -38,29 +36,43 @@ const AdminDashboard = () => {
     });
 
     useEffect(() => {
-        if (typeof window !== 'undefined') {
-            const savedSettings = localStorage.getItem(GLOBAL_SETTINGS_KEY);
-            if (savedSettings) {
-                try {
-                    const parsed = JSON.parse(savedSettings);
+        const loadSettings = async () => {
+            try {
+                console.log('🔧 Loading global settings from database...');
+                const savedSettings = await configurationService.getGlobalSettings();
+                if (savedSettings) {
                     setSettings(prev => ({ 
                         ...prev, 
-                        ...parsed,
-                        languages: parsed.languages && parsed.languages.length > 0 ? parsed.languages : ['English'],
+                        ...savedSettings,
+                        languages: savedSettings.languages && savedSettings.languages.length > 0 ? savedSettings.languages : ['English'],
                     }));
-                } catch (e) {
-                    console.error("Failed to parse global settings", e);
                 }
+                console.log('✅ Global settings loaded from database');
+            } catch (error) {
+                console.error('❌ Error loading global settings from database:', error);
             }
-        }
+        };
+
+        loadSettings();
     }, []);
 
-    const handleSaveSettings = () => {
-        if (typeof window !== 'undefined') {
-            localStorage.setItem(GLOBAL_SETTINGS_KEY, JSON.stringify(settings));
+    const handleSaveSettings = async () => {
+        try {
+            const success = await configurationService.saveGlobalSettings(settings);
+            if (success) {
+                toast({
+                    title: 'Settings Saved',
+                    description: 'Global settings have been updated in the database.',
+                });
+            } else {
+                throw new Error('Failed to save settings');
+            }
+        } catch (error) {
+            console.error('Error saving global settings:', error);
             toast({
-                title: 'Settings Saved',
-                description: 'Global settings have been updated.',
+                variant: 'destructive',
+                title: 'Save Failed',
+                description: 'Failed to save global settings to the database. Please try again.',
             });
         }
     };
