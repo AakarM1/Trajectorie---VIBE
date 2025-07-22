@@ -4,9 +4,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ProtectedRoute, useAuth } from '@/contexts/auth-context';
 import type { ConversationEntry, AnalysisResult, PreInterviewDetails, InterviewMode } from '@/types';
-import { analyzeConversation, type AnalyzeConversationInput } from '@/ai/flows/analyze-conversation';
-import { translateText } from '@/ai/flows/translate-text';
-import { generateInterviewQuestions, type GenerateInterviewQuestionsInput } from '@/ai/flows/generate-follow-up-questions';
+import type { AnalyzeConversationInput } from '@/ai/flows/analyze-conversation';
+import type { GenerateInterviewQuestionsInput } from '@/ai/flows/generate-follow-up-questions';
 import Flashcard from '@/components/flashcard';
 import ConversationSummary from '@/components/conversation-summary';
 import { Loader2, PartyPopper } from 'lucide-react';
@@ -86,8 +85,12 @@ function VerbalInterviewPage() {
                     numberOfQuestions: numAiQuestions,
                     isFollowUp: true, // ensures no "hello" questions
                 };
-                const aiQuestionsResult = await generateInterviewQuestions(aiQuestionsInput);
-                const aiGeneratedQuestions = aiQuestionsResult.questions.map(q => ({
+                const aiQuestionsResult = await fetch('/api/ai/generate-questions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(aiQuestionsInput)
+                }).then(res => res.json());
+                const aiGeneratedQuestions = aiQuestionsResult.questions.map((q: string) => ({
                     question: q,
                     preferredAnswer: "Evaluate for clarity, relevance, and depth.", // Generic guidance
                     competency: "AI-Assessed", // Generic competency
@@ -102,7 +105,11 @@ function VerbalInterviewPage() {
           if (details.language && details.language.toLowerCase() !== 'english' && questionsToUse.length > 0) {
               toast({ title: `Translating questions to ${details.language}...` });
               const translationPromises = questionsToUse.map(async (q) => {
-                  const result = await translateText({ textToTranslate: q.question, targetLanguage: details.language });
+                  const result = await fetch('/api/ai/translate', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ textToTranslate: q.question, targetLanguage: details.language })
+                  }).then(res => res.json());
                   return result.translatedText;
               });
               const translatedResults = await Promise.all(translationPromises);
@@ -173,7 +180,11 @@ function VerbalInterviewPage() {
           roleCategory: preInterviewDetails!.roleCategory,
           jobDescription: jobDescription,
         };
-        const result = await analyzeConversation(analysisInput);
+        const result = await fetch('/api/ai/analyze-conversation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(analysisInput)
+        }).then(res => res.json());
         setAnalysisResult(result);
         
         saveSubmission({

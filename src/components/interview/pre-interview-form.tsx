@@ -9,9 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ArrowRight, ChevronRight, Info, Lightbulb, Languages, CheckCircle } from "lucide-react";
 import type { PreInterviewDetails } from "@/types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-
-const JDT_CONFIG_KEY = 'jdt-config';
-const GLOBAL_SETTINGS_KEY = 'global-settings';
+import { configurationService } from '@/lib/config-service';
 
 
 interface PreInterviewFormProps {
@@ -44,34 +42,40 @@ export function PreInterviewForm({ onFormSubmit, defaultName = '', defaultRole =
     const [settings, setSettings] = useState({ timeLimit: 0, numberOfQuestions: 5, aiGeneratedQuestions: 0 });
 
     useEffect(() => {
-        if(typeof window !== 'undefined') {
-            const globalSettings = localStorage.getItem(GLOBAL_SETTINGS_KEY);
-            if (globalSettings) {
-                const parsed = JSON.parse(globalSettings);
-                setAvailableLanguages(parsed.languages || ['English']);
-                setLanguage(parsed.languages?.[0] || 'English');
-            }
+        const loadConfig = async () => {
+            try {
+                // Load global settings from Firestore
+                const globalSettings = await configurationService.getGlobalSettings();
+                if (globalSettings) {
+                    setAvailableLanguages(globalSettings.languages || ['English']);
+                    setLanguage(globalSettings.languages?.[0] || 'English');
+                }
 
-            const savedConfig = localStorage.getItem(JDT_CONFIG_KEY);
-            if(savedConfig) {
-                try {
-                    const { roles, settings: savedSettings } = JSON.parse(savedConfig);
-                    if (roles && roles.length > 0) {
-                        setAvailableRoles(roles.map((r: any) => r.roleName));
-                        setRoleCategory(roles[0].roleName);
+                // Load JDT config from Firestore
+                const savedConfig = await configurationService.getJDTConfig();
+                if (savedConfig) {
+                    if (savedConfig.roles && savedConfig.roles.length > 0) {
+                        setAvailableRoles(savedConfig.roles.map((r: any) => r.roleName));
+                        setRoleCategory(savedConfig.roles[0].roleName);
                     }
-                    if (savedSettings) {
+                    if (savedConfig.settings) {
                         setSettings({
-                            timeLimit: savedSettings.timeLimit || 0,
-                            numberOfQuestions: savedSettings.numberOfQuestions || 5,
-                            aiGeneratedQuestions: savedSettings.aiGeneratedQuestions || 0
+                            timeLimit: savedConfig.settings.timeLimit || 0,
+                            numberOfQuestions: savedConfig.settings.numberOfQuestions || 5,
+                            aiGeneratedQuestions: savedConfig.settings.aiGeneratedQuestions || 0
                         });
                     }
-                } catch (error) {
-                    console.error("Failed to parse JDT config for form", error);
                 }
+            } catch (error) {
+                console.error('Error loading JDT configuration:', error);
+                // Set defaults if there's an error
+                setAvailableLanguages(['English']);
+                setLanguage('English');
+                setSettings({ timeLimit: 0, numberOfQuestions: 5, aiGeneratedQuestions: 0 });
             }
-        }
+        };
+
+        loadConfig();
     }, []);
 
     const handleSubmit = (e: React.FormEvent) => {
