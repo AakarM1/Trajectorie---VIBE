@@ -3,14 +3,14 @@ import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
 
 // Firebase configuration
-// In a real app, these would come from environment variables
+// These should be set as environment variables in production
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "demo-key",
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "demo-app.firebaseapp.com",
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "demo-app",
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "demo-app.appspot.com",
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyDdNbACt-eseLyvXluj1uKuBQ7zWK47t-o",
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "trajectorie-vibe.firebaseapp.com",
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "trajectorie-vibe",
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "trajectorie-vibe.appspot.com",
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "123456789",
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:123456789:web:abcdef"
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:123456789:web:trajectorie-vibe"
 };
 
 // Initialize Firebase
@@ -20,16 +20,15 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);
 
-// Connect to emulators in development
-if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-  // Only connect to emulators in development and in browser
-  const isEmulatorConnected = () => {
-    // Check if already connected to avoid reconnection errors
-    return (db as any)._delegate?._databaseId?.projectId?.includes('demo') ||
-           process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID === 'demo-app';
-  };
-
-  if (isEmulatorConnected() && !window.location.hostname.includes('vercel')) {
+// Only connect to emulators in local development
+if (typeof window !== 'undefined' && 
+    process.env.NODE_ENV === 'development' && 
+    window.location.hostname === 'localhost') {
+  
+  const isUsingEmulators = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID === 'demo-app' ||
+                          !process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+  
+  if (isUsingEmulators) {
     try {
       // Connect to Firestore emulator
       if (!(db as any)._delegate._settings?.host?.includes('localhost')) {
