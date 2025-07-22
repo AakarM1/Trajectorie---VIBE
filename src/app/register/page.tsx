@@ -24,33 +24,43 @@ export default function RegisterPage() {
   const { toast } = useToast();
   const router = useRouter();
 
-  const handleRegister = (event: React.FormEvent) => {
+  const handleRegister = async (event: React.FormEvent) => {
     event.preventDefault();
     setIsLoading(true);
     
-    const success = register({
-      email,
-      password, // Password should be hashed server-side in a real app
-      candidateName,
-      candidateId,
-      clientName,
-      role,
-    });
-
-    if (success) {
-      toast({
-        title: 'Registration Successful',
-        description: 'You can now log in with your new account.',
+    try {
+      const success = await register({
+        email,
+        password, // Password should be hashed server-side in a real app
+        candidateName,
+        candidateId,
+        clientName,
+        role,
       });
-      router.push('/login');
-    } else {
+
+      if (success) {
+        toast({
+          title: 'Registration Successful',
+          description: 'You can now log in with your new account.',
+        });
+        router.push('/login');
+      } else {
+        toast({
+          variant: 'destructive',
+          title: 'Registration Failed',
+          description: 'An account with this email already exists.',
+        });
+      }
+    } catch (error) {
+      console.error('Registration error:', error);
       toast({
         variant: 'destructive',
-        title: 'Registration Failed',
-        description: 'An account with this email already exists.',
+        title: 'Registration Error',
+        description: 'An error occurred during registration. Please try again.',
       });
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
   
   return (

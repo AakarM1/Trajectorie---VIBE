@@ -22,16 +22,27 @@ export default function LoginPage() {
   const { toast } = useToast();
   const router = useRouter();
 
-  const handleLogin = (event: React.FormEvent) => {
+  const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
     setIsLoading(true);
-    const success = login(email, password);
-    if (!success) {
+    
+    try {
+      const success = await login(email, password);
+      if (!success) {
+        toast({
+          variant: 'destructive',
+          title: 'Login Failed',
+          description: 'Invalid email or password. Please try again.',
+        });
+      }
+    } catch (error) {
+      console.error('Login error:', error);
       toast({
         variant: 'destructive',
-        title: 'Login Failed',
-        description: 'Invalid email or password. Please try again.',
+        title: 'Login Error',
+        description: 'An error occurred during login. Please try again.',
       });
+    } finally {
       setIsLoading(false);
     }
   };
