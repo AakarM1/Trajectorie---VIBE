@@ -8,7 +8,8 @@ import {
   userService, 
   submissionService, 
   convertFirestoreSubmission,
-  type FirestoreUser 
+  type FirestoreUser,
+  type FirestoreSubmission
 } from '@/lib/database';
 
 // Define the user type
@@ -37,6 +38,8 @@ interface AuthContextType {
   getUsers: () => Promise<User[]>;
   deleteUser: (userId: string) => Promise<void>;
   updateUser: (userId: string, updates: Partial<User>) => Promise<void>;
+  // Real-time listeners
+  onSubmissionsChange: (callback: (submissions: Submission[]) => void) => () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -217,9 +220,88 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const saveSubmission = async (submission: Omit<Submission, 'id' | 'date'>) => {
     try {
-      console.log('💾 Saving submission to Firestore');
-      await submissionService.create(submission);
-      console.log('✅ Submission saved successfully to Firestore');
+      console.log('💾 Saving submission to Firestore', submission);
+      console.log('📊 Submission data:', {
+        candidateName: submission.candidateName,
+        testType: submission.testType,
+        historyLength: submission.history.length,
+        hasReport: !!submission.report
+      });
+      
+      // Check for undefined values in the submission
+      console.log('🔍 Checking for undefined values...');
+      const checkUndefined = (obj: any, path: string = ''): void => {
+        if (obj === undefined) {
+          console.warn(`❌ Found undefined at path: ${path}`);
+          return;
+        }
+        if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+          Object.entries(obj).forEach(([key, value]) => {
+            checkUndefined(value, path ? `${path}.${key}` : key);
+          });
+        } else if (Array.isArray(obj)) {
+          obj.forEach((item, index) => {
+            checkUndefined(item, `${path}[${index}]`);
+          });
+        }
+      };
+      
+      checkUndefined(submission, 'submission');
+      
+      // Process media files that might be too large for Firestore
+      const processedHistory = await Promise.all(
+        submission.history.map(async (entry, index) => {
+          if (!entry.videoDataUri) return entry;
+          
+          // Dynamic import to avoid bundling issues
+          const { isDataUriTooLarge, dataUriToBlob, uploadMediaToStorage } = await import('@/lib/media-storage');
+          
+          // Check if the media file is too large for Firestore
+          if (isDataUriTooLarge(entry.videoDataUri)) {
+            try {
+              console.log(`📎 Media file for Q${index + 1} is large, uploading to Firebase Storage...`);
+              
+              // Convert data URI to blob
+              const blob = await dataUriToBlob(entry.videoDataUri);
+              
+              // Determine media type
+              const mediaType = entry.videoDataUri.startsWith('data:video') ? 'video' : 'audio';
+              
+              // Generate a temporary submission ID for organizing files
+              const tempSubmissionId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+              
+              // Upload to Firebase Storage
+              const downloadURL = await uploadMediaToStorage(blob, tempSubmissionId, index, mediaType);
+              
+              // Return entry with Firebase Storage URL instead of data URI
+              return {
+                ...entry,
+                videoDataUri: downloadURL,
+                _isStorageUrl: true // Flag to indicate this is a storage URL
+              };
+            } catch (storageError) {
+              console.warn(`⚠️ Failed to upload to Firebase Storage, keeping original data URI:`, storageError);
+              return entry; // Keep original data URI as fallback
+            }
+          }
+          
+          return entry; // Keep small files as data URIs
+        })
+      );
+      
+      const submissionWithProcessedMedia = {
+        ...submission,
+        history: processedHistory
+      };
+      
+      console.log('📤 About to save processed submission:', {
+        candidateName: submissionWithProcessedMedia.candidateName,
+        testType: submissionWithProcessedMedia.testType,
+        historyLength: submissionWithProcessedMedia.history.length
+      });
+      
+      const savedId = await submissionService.create(submissionWithProcessedMedia);
+      console.log('✅ Submission saved successfully to Firestore with ID:', savedId);
     } catch (error) {
       console.error('❌ Error saving submission to Firestore:', error);
       throw error;
@@ -316,6 +398,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const onSubmissionsChange = (callback: (submissions: Submission[]) => void) => {
+    console.log('🔄 Setting up real-time submissions listener');
+    return submissionService.onSubmissionsChange((fsSubmissions: FirestoreSubmission[]) => {
+      const submissions = fsSubmissions.map(convertFirestoreSubmission);
+      console.log(`🔄 Real-time update: ${submissions.length} submissions received`);
+      callback(submissions);
+    });
+  };
+
   const value: AuthContextType = {
     user,
     login,
@@ -329,7 +420,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     clearAllSubmissions,
     getUsers,
     deleteUser,
-    updateUser
+    updateUser,
+    onSubmissionsChange
   };
 
   return (

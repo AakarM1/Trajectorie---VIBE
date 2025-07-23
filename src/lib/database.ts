@@ -10,7 +10,9 @@ import {
   where, 
   orderBy,
   serverTimestamp,
-  Timestamp 
+  Timestamp,
+  onSnapshot,
+  type Unsubscribe
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Submission } from '@/types';
@@ -126,19 +128,61 @@ export const userService = {
 
 // Submission operations
 export const submissionService = {
-  // Get all submissions
+  // Get all submissions (one-time fetch)
   async getAll(): Promise<FirestoreSubmission[]> {
     try {
-      const q = query(collection(db, COLLECTIONS.SUBMISSIONS), orderBy('createdAt', 'desc'));
-      const querySnapshot = await getDocs(q);
-      return querySnapshot.docs.map(doc => ({
+      const querySnapshot = await getDocs(collection(db, COLLECTIONS.SUBMISSIONS));
+      const submissions = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       } as FirestoreSubmission));
+      
+      // Sort by date field instead of createdAt to avoid index requirements
+      return submissions.sort((a, b) => {
+        const aTime = a.date?.toMillis ? a.date.toMillis() : 0;
+        const bTime = b.date?.toMillis ? b.date.toMillis() : 0;
+        return bTime - aTime; // descending order (newest first)
+      });
     } catch (error) {
       console.error('Error fetching submissions:', error);
       return [];
     }
+  },
+
+  // Listen to all submissions (real-time)
+  onSubmissionsChange(callback: (submissions: FirestoreSubmission[]) => void): Unsubscribe {
+    console.log('🔄 Setting up Firestore real-time listener for submissions');
+    const q = collection(db, COLLECTIONS.SUBMISSIONS);
+    return onSnapshot(q, (querySnapshot) => {
+      console.log(`🔄 Firestore listener triggered: ${querySnapshot.docs.length} documents found`);
+      
+      const submissions = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        console.log(`📄 Document ${doc.id}:`, {
+          candidateName: data.candidateName,
+          testType: data.testType,
+          hasDate: !!data.date,
+          hasCreatedAt: !!data.createdAt
+        });
+        return {
+          id: doc.id,
+          ...data
+        } as FirestoreSubmission;
+      });
+      
+      // Sort by date field instead of createdAt to avoid index requirements
+      const sortedSubmissions = submissions.sort((a, b) => {
+        const aTime = a.date?.toMillis ? a.date.toMillis() : 0;
+        const bTime = b.date?.toMillis ? b.date.toMillis() : 0;
+        return bTime - aTime; // descending order (newest first)
+      });
+      
+      console.log(`🔄 Sending ${sortedSubmissions.length} sorted submissions to callback`);
+      callback(sortedSubmissions);
+    }, (error) => {
+      console.error('❌ Error listening to submissions:', error);
+      callback([]); // Return empty array on error
+    });
   },
 
   // Get submission by ID
@@ -157,17 +201,52 @@ export const submissionService = {
   // Create new submission
   async create(submissionData: Omit<Submission, 'id' | 'date'>): Promise<string | null> {
     try {
+      console.log('🗄️ Creating submission in Firestore:', {
+        candidateName: submissionData.candidateName,
+        testType: submissionData.testType
+      });
+      
+      // Clean the data to remove undefined values
+      const cleanedData = this.removeUndefinedFields(submissionData);
+      console.log('🧹 Cleaned submission data:', cleanedData);
+      
       const docRef = await addDoc(collection(db, COLLECTIONS.SUBMISSIONS), {
-        ...submissionData,
+        ...cleanedData,
         date: serverTimestamp(),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
+      
+      console.log('✅ Submission document created with ID:', docRef.id);
       return docRef.id;
     } catch (error) {
-      console.error('Error creating submission:', error);
+      console.error('❌ Error creating submission:', error);
+      console.error('❌ Submission data that failed:', submissionData);
       return null;
     }
+  },
+
+  // Helper function to remove undefined fields recursively
+  removeUndefinedFields(obj: any): any {
+    if (obj === null || obj === undefined) {
+      return null;
+    }
+    
+    if (Array.isArray(obj)) {
+      return obj.map(item => this.removeUndefinedFields(item));
+    }
+    
+    if (typeof obj === 'object') {
+      const cleaned: any = {};
+      for (const [key, value] of Object.entries(obj)) {
+        if (value !== undefined) {
+          cleaned[key] = this.removeUndefinedFields(value);
+        }
+      }
+      return cleaned;
+    }
+    
+    return obj;
   },
 
   // Delete submission

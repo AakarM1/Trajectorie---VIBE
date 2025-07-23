@@ -9,9 +9,7 @@ import { ChevronRight, Info, Lightbulb, Languages, CheckCircle } from 'lucide-re
 import React, {useState, useEffect} from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from '../ui/label';
-
-const SJT_CONFIG_KEY = 'sjt-config';
-const GLOBAL_SETTINGS_KEY = 'global-settings';
+import { configurationService } from '@/lib/config-service';
 
 interface SJTInstructionsProps {
   onProceed: (details: PreInterviewDetails) => void;
@@ -39,29 +37,33 @@ export function SJTInstructions({ onProceed }: SJTInstructionsProps) {
   const [settings, setSettings] = useState({ timeLimit: 0, numberOfQuestions: 5 });
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-        const globalSettings = localStorage.getItem(GLOBAL_SETTINGS_KEY);
+    const loadConfig = async () => {
+      try {
+        // Load global settings from Firestore
+        const globalSettings = await configurationService.getGlobalSettings();
         if (globalSettings) {
-            const parsed = JSON.parse(globalSettings);
-            setAvailableLanguages(parsed.languages || ['English']);
-            setLanguage(parsed.languages?.[0] || 'English');
+          setAvailableLanguages(globalSettings.languages || ['English']);
+          setLanguage(globalSettings.languages?.[0] || 'English');
         }
 
-        const savedConfig = localStorage.getItem(SJT_CONFIG_KEY);
-        if (savedConfig) {
-            try {
-                const { settings: savedSettings } = JSON.parse(savedConfig);
-                if (savedSettings) {
-                    setSettings({
-                        timeLimit: savedSettings.timeLimit || 0,
-                        numberOfQuestions: savedSettings.numberOfQuestions || 5,
-                    });
-                }
-            } catch (error) {
-                console.error("Failed to parse SJT settings", error);
-            }
+        // Load SJT config from Firestore
+        const savedConfig = await configurationService.getSJTConfig();
+        if (savedConfig && savedConfig.settings) {
+          setSettings({
+            timeLimit: savedConfig.settings.timeLimit || 0,
+            numberOfQuestions: savedConfig.settings.numberOfQuestions || 5,
+          });
         }
-    }
+      } catch (error) {
+        console.error('Error loading SJT configuration:', error);
+        // Set defaults if there's an error
+        setAvailableLanguages(['English']);
+        setLanguage('English');
+        setSettings({ timeLimit: 0, numberOfQuestions: 5 });
+      }
+    };
+
+    loadConfig();
   }, []);
   
   const handleProceed = () => {

@@ -15,10 +15,11 @@ export interface MetaCompetency {
 export interface ConversationEntry {
   question: string;
   answer: string | null;
-  videoDataUri?: string; // Can be video or audio data URI
+  videoDataUri?: string; // Can be video/audio data URI or Firebase Storage URL
   translatedAnswer?: string; // For future translation feature
   preferredAnswer?: string;
   competency?: string;
+  _isStorageUrl?: boolean; // Flag to indicate if videoDataUri is a Firebase Storage URL
 }
 
 export type AppStatus = 'INITIAL' | 'ASKING' | 'ANALYZING' | 'RESULTS' | 'ERROR';

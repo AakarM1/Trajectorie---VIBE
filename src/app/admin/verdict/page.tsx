@@ -12,7 +12,7 @@ import Link from 'next/link';
 import Header from '@/components/header';
 import { useToast } from '@/hooks/use-toast';
 import type { Submission } from '@/types';
-import { generateFinalVerdict, type GenerateFinalVerdictOutput } from '@/ai/flows/generate-final-verdict';
+import type { GenerateFinalVerdictOutput } from '@/ai/flows/generate-final-verdict';
 
 type CandidateWithReports = {
     name: string;
@@ -73,12 +73,16 @@ const FinalVerdictPage = () => {
         setVerdict(null);
 
         try {
-            const result = await generateFinalVerdict({
-                candidateName: selectedCandidate.name,
-                roleCategory: selectedCandidate.jdtReport.report.competencyAnalysis[0]?.competencies[0]?.name || 'General Role', // A bit of a guess for role
-                jobDescriptionTestReport: selectedCandidate.jdtReport.report,
-                situationalJudgementTestReport: selectedCandidate.sjtReport.report,
-            });
+            const result = await fetch('/api/ai/generate-verdict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    candidateName: selectedCandidate.name,
+                    roleCategory: selectedCandidate.jdtReport.report.competencyAnalysis[0]?.competencies[0]?.name || 'General Role', // A bit of a guess for role
+                    jobDescriptionTestReport: selectedCandidate.jdtReport.report,
+                    situationalJudgementTestReport: selectedCandidate.sjtReport.report,
+                })
+            }).then(res => res.json());
             setVerdict(result);
             toast({
                 title: 'Verdict Generated',

@@ -9,5 +9,10 @@
   },
   "env": {
     "NEXT_PUBLIC_FIREBASE_PROJECT_ID": "demo-app"
+  },
+  "build": {
+    "env": {
+      "NODE_OPTIONS": "--max-old-space-size=4096"
+    }
   }
 }

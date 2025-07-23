@@ -4,8 +4,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ProtectedRoute, useAuth } from '@/contexts/auth-context';
 import type { ConversationEntry, AnalysisResult, PreInterviewDetails, InterviewMode } from '@/types';
-import { analyzeSJTResponse, type AnalyzeSJTResponseInput, type AnalyzeSJTResponseOutput } from '@/ai/flows/analyze-sjt-response';
-import { translateText } from '@/ai/flows/translate-text';
+import type { AnalyzeSJTResponseInput, AnalyzeSJTResponseOutput } from '@/ai/flows/analyze-sjt-response';
 import Flashcard from '@/components/flashcard';
 import ConversationSummary from '@/components/conversation-summary';
 import { Loader2, PartyPopper } from 'lucide-react';
@@ -112,8 +111,16 @@ function SJTInterviewPage() {
         toast({ title: `Translating scenarios to ${details.language}...` });
         const translatedScenarios = await Promise.all(scenariosToUse.map(async (s) => {
             const [translatedSituation, translatedQuestion] = await Promise.all([
-                translateText({ textToTranslate: s.situation, targetLanguage: details.language }),
-                translateText({ textToTranslate: s.question, targetLanguage: details.language })
+                fetch('/api/ai/translate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ textToTranslate: s.situation, targetLanguage: details.language })
+                }).then(res => res.json()),
+                fetch('/api/ai/translate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ textToTranslate: s.question, targetLanguage: details.language })
+                }).then(res => res.json())
             ]);
             return {
                 ...s,
@@ -163,7 +170,11 @@ function SJTInterviewPage() {
                 assessedCompetency: scenario.assessedCompetency,
                 candidateAnswer: entry.answer,
             };
-            const result = await analyzeSJTResponse(analysisInput);
+            const result = await fetch('/api/ai/analyze-sjt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(analysisInput)
+            }).then(res => res.json());
             sjtAnalyses.push({ ...result, competency: scenario.assessedCompetency });
           }
         }
