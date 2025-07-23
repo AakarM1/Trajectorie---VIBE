@@ -20,7 +20,7 @@ const GLOBAL_SETTINGS_KEY = 'global-settings';
 
 
 function VerbalInterviewPage() {
-  const { user, saveSubmission } = useAuth();
+  const { user, saveSubmission, canUserTakeTest } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
 
@@ -36,7 +36,34 @@ function VerbalInterviewPage() {
   const [timeLimit, setTimeLimit] = useState(0); // in minutes
   const [showReport, setShowReport] = useState(true);
   const [questionTimes, setQuestionTimes] = useState<number[]>([]); // Track time per question
+  const [canTakeTest, setCanTakeTest] = useState(true);
+  const [checkingAttempts, setCheckingAttempts] = useState(true);
+  
+  const MAX_ATTEMPTS = 1;
 
+  // Check if user can take the test
+  useEffect(() => {
+    const checkAttempts = async () => {
+      try {
+        const canTake = await canUserTakeTest('JDT', MAX_ATTEMPTS);
+        setCanTakeTest(canTake);
+        if (!canTake) {
+          toast({
+            variant: 'destructive',
+            title: 'Maximum Attempts Reached',
+            description: `You have already completed the maximum number of attempts (${MAX_ATTEMPTS}) for this test.`,
+          });
+        }
+      } catch (error) {
+        console.error('Error checking attempts:', error);
+        setCanTakeTest(true); // Allow test if check fails
+      } finally {
+        setCheckingAttempts(false);
+      }
+    };
+
+    checkAttempts();
+  }, [canUserTakeTest, toast]);
 
   const startInterview = useCallback(async (details: PreInterviewDetails) => {
     setPreInterviewDetails(details);
@@ -377,7 +404,32 @@ function VerbalInterviewPage() {
     <div className="flex flex-col min-h-screen">
       <Header />
       <main className="flex-grow flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8">
-        {renderContent()}
+        {checkingAttempts ? (
+          <div className="flex flex-col items-center justify-center text-center p-8">
+            <Loader2 className="h-16 w-16 animate-spin text-primary mb-4" />
+            <h2 className="text-2xl font-headline text-primary">Checking access...</h2>
+          </div>
+        ) : !canTakeTest ? (
+          <Card className="w-full max-w-lg text-center shadow-lg border-red-200">
+            <CardContent className="p-8">
+              <div className="h-16 w-16 text-red-500 mx-auto mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                </svg>
+              </div>
+              <h2 className="text-2xl font-headline text-red-600 mb-2">Access Restricted</h2>
+              <p className="text-muted-foreground mb-6">
+                You have reached the maximum number of attempts ({MAX_ATTEMPTS}) for this test. 
+                Please contact your administrator if you need additional attempts.
+              </p>
+              <Button onClick={() => router.push('/')} variant="outline">
+                Back to Dashboard
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          renderContent()
+        )}
       </main>
     </div>
   );

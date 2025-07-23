@@ -55,6 +55,7 @@ export interface Submission {
     date: string;
     report: AnalysisResult;
     history: ConversationEntry[];
+    candidateId?: string; // Track which user made this submission
 }
 
     

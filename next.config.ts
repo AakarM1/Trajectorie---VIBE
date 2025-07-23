@@ -34,14 +34,6 @@ const nextConfig: NextConfig = {
       };
     }
 
-    // Handle handlebars and genkit compatibility issues
-    config.module.rules.push({
-      test: /node_modules\/handlebars\/lib\/index\.js$/,
-      use: {
-        loader: 'null-loader',
-      },
-    });
-
     // Ignore require.extensions warnings for specific modules
     config.ignoreWarnings = [
       ...(config.ignoreWarnings || []),
@@ -49,10 +41,17 @@ const nextConfig: NextConfig = {
         module: /node_modules\/handlebars\/lib\/index\.js/,
       },
       /require\.extensions is not supported by webpack/,
+      /Critical dependency: the request of a dependency is an expression/,
     ];
 
-    // Exclude problematic OpenTelemetry modules
+    // Exclude problematic modules that cause build issues
     config.externals = config.externals || [];
+    if (!isServer) {
+      config.externals.push({
+        'handlebars': 'commonjs handlebars',
+      });
+    }
+    
     config.externals.push({
       '@opentelemetry/exporter-jaeger': 'commonjs @opentelemetry/exporter-jaeger',
       '@opentelemetry/exporter-prometheus': 'commonjs @opentelemetry/exporter-prometheus',

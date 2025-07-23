@@ -38,6 +38,9 @@ interface AuthContextType {
   getUsers: () => Promise<User[]>;
   deleteUser: (userId: string) => Promise<void>;
   updateUser: (userId: string, updates: Partial<User>) => Promise<void>;
+  // Attempt tracking
+  getUserAttempts: (testType: 'JDT' | 'SJT') => Promise<number>;
+  canUserTakeTest: (testType: 'JDT' | 'SJT', maxAttempts: number) => Promise<boolean>;
   // Real-time listeners
   onSubmissionsChange: (callback: (submissions: Submission[]) => void) => () => void;
 }
@@ -228,6 +231,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         hasReport: !!submission.report
       });
       
+      // Add candidateId to the submission if user is logged in
+      const submissionWithCandidateId = {
+        ...submission,
+        candidateId: user?.candidateId || submission.candidateName // fallback to name if no user
+      };
+      
       // Check for undefined values in the submission
       console.log('🔍 Checking for undefined values...');
       const checkUndefined = (obj: any, path: string = ''): void => {
@@ -246,11 +255,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
       };
       
-      checkUndefined(submission, 'submission');
+      checkUndefined(submissionWithCandidateId, 'submission');
       
       // Process media files that might be too large for Firestore
       const processedHistory = await Promise.all(
-        submission.history.map(async (entry, index) => {
+        submissionWithCandidateId.history.map(async (entry, index) => {
           if (!entry.videoDataUri) return entry;
           
           // Dynamic import to avoid bundling issues
@@ -290,7 +299,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       );
       
       const submissionWithProcessedMedia = {
-        ...submission,
+        ...submissionWithCandidateId,
         history: processedHistory
       };
       
@@ -407,6 +416,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     });
   };
 
+  // Get number of attempts for a specific test type by current user
+  const getUserAttempts = async (testType: 'JDT' | 'SJT'): Promise<number> => {
+    if (!user) return 0;
+    
+    try {
+      const submissions = await getSubmissions();
+      const userSubmissions = submissions.filter(
+        s => s.candidateId === user.candidateId && s.testType === testType
+      );
+      return userSubmissions.length;
+    } catch (error) {
+      console.error('Error getting user attempts:', error);
+      return 0;
+    }
+  };
+
+  // Check if user can take the test based on max attempts
+  const canUserTakeTest = async (testType: 'JDT' | 'SJT', maxAttempts: number): Promise<boolean> => {
+    if (!user) return false;
+    
+    const currentAttempts = await getUserAttempts(testType);
+    return currentAttempts < maxAttempts;
+  };
+
   const value: AuthContextType = {
     user,
     login,
@@ -421,6 +454,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     getUsers,
     deleteUser,
     updateUser,
+    getUserAttempts,
+    canUserTakeTest,
     onSubmissionsChange
   };
 
