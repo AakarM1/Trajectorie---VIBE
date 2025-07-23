@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-import { Loader2, Send, Type, CheckCircle, RefreshCcw, Info, ArrowLeft, ArrowRight, Video, Mic, Square } from 'lucide-react';
+import { Loader2, Send, Type, CheckCircle, RefreshCcw, Info, ArrowLeft, ArrowRight, Video, Mic, Square, X } from 'lucide-react';
 import MediaCapture from './audio-recorder';
 import { transcribeAudio, type TranscribeAudioInput } from '@/ai/flows/transcribe-audio';
 import { useToast } from '@/hooks/use-toast';
@@ -13,6 +13,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { ConversationEntry } from '@/types';
 import { Switch } from './ui/switch';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 interface FlashcardProps {
   question: string;
@@ -61,27 +62,45 @@ const Flashcard: React.FC<FlashcardProps> = ({
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [editableTranscription, setEditableTranscription] = useState('');
   const [textAnswer, setTextAnswer] = useState('');
+  const [showInstructions, setShowInstructions] = useState(false);
   const { toast } = useToast();
   
-  const [testTimeLeft, setTestTimeLeft] = useState(timeLimitInMinutes * 60);
+  const [testTimeLeft, setTestTimeLeft] = useState(0);
   const [questionTime, setQuestionTime] = useState(0);
 
   const questionTimerRef = useRef<NodeJS.Timeout>();
+  const testTimerRef = useRef<NodeJS.Timeout>();
 
 
+  // Initialize test timer when component mounts or timeLimitInMinutes changes
   useEffect(() => {
     if (timeLimitInMinutes > 0) {
-      const timer = setInterval(() => {
+      setTestTimeLeft(timeLimitInMinutes * 60);
+      
+      // Clear any existing timer
+      if (testTimerRef.current) {
+        clearInterval(testTimerRef.current);
+      }
+      
+      testTimerRef.current = setInterval(() => {
         setTestTimeLeft(prevTime => {
           if (prevTime <= 1) {
-            clearInterval(timer);
+            clearInterval(testTimerRef.current!);
             onTimeUp();
             return 0;
           }
           return prevTime - 1;
         });
       }, 1000);
-      return () => clearInterval(timer);
+      
+      return () => {
+        if (testTimerRef.current) {
+          clearInterval(testTimerRef.current);
+        }
+      };
+    } else {
+      // If no time limit, show unlimited time
+      setTestTimeLeft(0);
     }
   }, [timeLimitInMinutes, onTimeUp]);
 
@@ -221,7 +240,7 @@ const Flashcard: React.FC<FlashcardProps> = ({
                 <div className='h-6 w-6 rounded-full bg-red-500 flex items-center justify-center'>
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-timer"><line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="12" y1="6" y2="2"/><circle cx="12" cy="14" r="8"/></svg>
                 </div>
-                TEST TIME | {formatTime(testTimeLeft)}
+                TEST TIME | {timeLimitInMinutes > 0 ? formatTime(testTimeLeft) : 'Unlimited'}
               </div>
               <div className='bg-red-500 hover:bg-red-600 rounded-full px-4 py-1 h-auto text-white flex items-center gap-2'>
                 <Button onClick={onFinishInterview} variant="ghost" size="sm" className="text-white hover:bg-red-700 p-0 h-auto">
@@ -236,7 +255,7 @@ const Flashcard: React.FC<FlashcardProps> = ({
                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                     Question Time | {formatTime(questionTime)}
                 </div>
-                <Button variant="outline" className="bg-orange-400 hover:bg-orange-500 text-white rounded-full border-orange-500 px-4 py-1 h-auto">
+                <Button variant="outline" className="bg-orange-400 hover:bg-orange-500 text-white rounded-full border-orange-500 px-4 py-1 h-auto" onClick={() => setShowInstructions(true)}>
                     Instruction <Info className="ml-2 h-4 w-4" />
                 </Button>
            </div>
@@ -325,6 +344,54 @@ const Flashcard: React.FC<FlashcardProps> = ({
           </div>
         </>
       )}
+
+      {/* Instructions Modal */}
+      <Dialog open={showInstructions} onOpenChange={setShowInstructions}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold text-primary flex items-center gap-2">
+              <Info className="h-6 w-6" />
+              Test Instructions
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h3 className="font-semibold text-blue-800 mb-2">Test Guidelines:</h3>
+              <ul className="space-y-2 text-sm text-blue-700">
+                <li>• Answer all questions in one attempt, so start when you are really ready.</li>
+                <li>• "Submit" every response and "Finish Test" when you have responded to all.</li>
+                <li>• If no option matches your real life response to a question, choose one that is closest.</li>
+                <li>• Keep it real life, stay spontaneous. Do not overthink a response.</li>
+              </ul>
+            </div>
+            
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <h3 className="font-semibold text-green-800 mb-2">Navigation:</h3>
+              <ul className="space-y-2 text-sm text-green-700">
+                <li>• Use the numbered buttons to navigate between questions</li>
+                <li>• Green numbers indicate answered questions</li>
+                <li>• You can review and change your answers before finishing</li>
+                <li>• {timeLimitInMinutes > 0 ? `The timer shows your remaining test time (${timeLimitInMinutes} minutes total)` : 'This test has no time limit'}</li>
+              </ul>
+            </div>
+            
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <h3 className="font-semibold text-amber-800 mb-2">Important Reminders:</h3>
+              <ul className="space-y-2 text-sm text-amber-700">
+                <li>• Try not to refresh the page, you will lose the answers you've worked hard to complete.</li>
+                <li>• Don't shut the browser, and avoid power-outs if you can.</li>
+                <li>• Choose what you would really do, not what you should ideally do.</li>
+                <li>• Submit every answer and Click "Finish" test when you've answered all!</li>
+              </ul>
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <Button onClick={() => setShowInstructions(false)} className="bg-primary hover:bg-primary/90">
+              Got it!
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
