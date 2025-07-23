@@ -35,6 +35,7 @@ function VerbalInterviewPage() {
   const [jobDescription, setJobDescription] = useState('');
   const [timeLimit, setTimeLimit] = useState(0); // in minutes
   const [showReport, setShowReport] = useState(true);
+  const [questionTimes, setQuestionTimes] = useState<number[]>([]); // Track time per question
 
 
   const startInterview = useCallback(async (details: PreInterviewDetails) => {
@@ -143,6 +144,9 @@ function VerbalInterviewPage() {
       }
       setJobDescription(jd);
       setConversationHistory(questionsToUse);
+      
+      // Initialize question times array
+      setQuestionTimes(new Array(questionsToUse.length).fill(0));
     } catch (error) {
       console.error("Error starting interview:", error);
       toast({
@@ -157,6 +161,8 @@ function VerbalInterviewPage() {
   }, [toast]);
 
   const handleFinishInterview = useCallback(async () => {
+      console.log('🏁 Interview finish button clicked');
+      
       const answeredHistory = conversationHistory.filter(e => e.answer);
       if (answeredHistory.length === 0) {
           toast({
@@ -166,48 +172,95 @@ function VerbalInterviewPage() {
           });
           return;
       }
+      
+      console.log(`📊 Processing ${answeredHistory.length} answers`);
       setStatus('ANALYZING');
       setIsProcessing(true);
+      
       try {
-        const analysisInput: AnalyzeConversationInput = {
-          conversationHistory: answeredHistory.map(h => ({
-              question: h.question,
-              answer: h.answer!,
-              preferredAnswer: h.preferredAnswer,
-              competency: h.competency
-          })),
-          name: preInterviewDetails!.name,
-          roleCategory: preInterviewDetails!.roleCategory,
-          jobDescription: jobDescription,
-        };
-        const result = await fetch('/api/ai/analyze-conversation', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(analysisInput)
-        }).then(res => res.json());
-        setAnalysisResult(result);
+        // First, save the submission to database immediately
+        console.log('💾 Saving interview submission to database...');
         
-        saveSubmission({
+        // Create a basic result structure
+        const basicResult: AnalysisResult = {
+            strengths: `Candidate completed ${answeredHistory.length} out of ${conversationHistory.length} interview questions. Responses demonstrate engagement with the interview process.`,
+            weaknesses: "Detailed analysis pending. Please review individual responses for comprehensive feedback.",
+            summary: `JDT Interview completed on ${new Date().toLocaleDateString()}. ${answeredHistory.length} questions answered out of ${conversationHistory.length} total questions.`,
+            competencyAnalysis: [{
+                name: "Interview Completion",
+                competencies: [{
+                    name: "Participation",
+                    score: Math.round((answeredHistory.length / conversationHistory.length) * 10)
+                }]
+            }]
+        };
+
+        // Save submission immediately with basic analysis
+        await saveSubmission({
             candidateName: preInterviewDetails!.name,
             testType: 'JDT',
-            report: result,
+            report: basicResult,
             history: conversationHistory,
         });
+
+        console.log('✅ Interview submission saved successfully');
+
+        // Try AI analysis in background (optional - won't crash if it fails)
+        try {
+          console.log('🤖 Attempting AI analysis for interview...');
+          const analysisInput = {
+            conversationHistory: answeredHistory.map(h => ({
+                question: h.question,
+                answer: h.answer!,
+                preferredAnswer: h.preferredAnswer,
+                competency: h.competency
+            })),
+            name: preInterviewDetails!.name,
+            roleCategory: preInterviewDetails!.roleCategory,
+            jobDescription: jobDescription,
+          };
+          
+          const result = await fetch('/api/ai/analyze-conversation', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(analysisInput),
+              signal: AbortSignal.timeout(15000) // 15 second timeout
+          }).then(res => {
+            if (!res.ok) throw new Error(`API responded with ${res.status}`);
+            return res.json();
+          });
+          
+          setAnalysisResult(result);
+          console.log('✅ AI analysis completed successfully for interview');
+        } catch (aiError) {
+          console.warn('⚠️ AI analysis failed for interview, but submission was saved:', aiError);
+          setAnalysisResult(basicResult);
+        }
         
         setStatus(showReport ? 'RESULTS' : 'COMPLETED');
+        toast({
+          title: 'Interview Completed!',
+          description: 'Your responses have been saved successfully.',
+        });
+        
+        // Redirect to home page after a short delay
+        setTimeout(() => {
+          console.log('🏠 Redirecting to home page');
+          router.push('/');
+        }, 2000);
 
       } catch (error) {
-        console.error("Error analyzing conversation:", error);
+        console.error("❌ Error in finish interview:", error);
         toast({
           variant: 'destructive',
-          title: 'Analysis Failed',
-          description: 'There was an error analyzing your responses. Please try again.',
+          title: 'Submission Failed',
+          description: 'There was an error saving your responses. Please try again.',
         });
         setStatus('INTERVIEW');
       } finally {
         setIsProcessing(false);
       }
-  }, [conversationHistory, preInterviewDetails, jobDescription, toast, saveSubmission, showReport]);
+  }, [conversationHistory, preInterviewDetails, jobDescription, toast, saveSubmission, showReport, router]);
 
 
   const handleAnswerSubmit = async (answer: string, videoDataUri?: string) => {
@@ -278,6 +331,8 @@ function VerbalInterviewPage() {
               currentQuestionIndex={currentQuestionIndex}
               setCurrentQuestionIndex={setCurrentQuestionIndex}
               conversationHistory={conversationHistory}
+              questionTimes={questionTimes}
+              setQuestionTimes={setQuestionTimes}
             />
           </div>
         );

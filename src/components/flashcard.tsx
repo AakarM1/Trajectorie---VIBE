@@ -12,7 +12,6 @@ import type { InterviewMode } from '@/types';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { ConversationEntry } from '@/types';
-import { Switch } from './ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 interface FlashcardProps {
@@ -31,6 +30,8 @@ interface FlashcardProps {
   currentQuestionIndex: number;
   setCurrentQuestionIndex: (index: number) => void;
   conversationHistory: ConversationEntry[];
+  questionTimes: number[]; // Array to track time spent per question
+  setQuestionTimes: (times: number[]) => void;
 }
 
 
@@ -55,7 +56,9 @@ const Flashcard: React.FC<FlashcardProps> = ({
   onTimeUp,
   currentQuestionIndex,
   setCurrentQuestionIndex,
-  conversationHistory
+  conversationHistory,
+  questionTimes,
+  setQuestionTimes
 }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [mediaData, setMediaData] = useState<{ blob: Blob; dataUri: string } | null>(null);
@@ -65,62 +68,113 @@ const Flashcard: React.FC<FlashcardProps> = ({
   const [showInstructions, setShowInstructions] = useState(false);
   const { toast } = useToast();
   
-  const [testTimeLeft, setTestTimeLeft] = useState(0);
-  const [questionTime, setQuestionTime] = useState(0);
+  const [testTimeElapsed, setTestTimeElapsed] = useState(0); // Track elapsed time in seconds
+  const [currentQuestionTime, setCurrentQuestionTime] = useState(0); // Current question timer
 
   const questionTimerRef = useRef<NodeJS.Timeout>();
   const testTimerRef = useRef<NodeJS.Timeout>();
+  const questionTimesRef = useRef<number[]>(questionTimes); // Use ref to avoid state update conflicts
 
 
-  // Initialize test timer when component mounts or timeLimitInMinutes changes
+  // Keep ref in sync with props
   useEffect(() => {
+    questionTimesRef.current = questionTimes;
+  }, [questionTimes]);
+
+  // Start test timer (stopwatch) when component mounts - ONLY ONCE
+  useEffect(() => {
+    // Start stopwatch - counts UP from 0, only if not already started
+    if (testTimerRef.current) return; // Don't restart if already running
+    
+    testTimerRef.current = setInterval(() => {
+      setTestTimeElapsed(prevTime => prevTime + 1);
+    }, 1000);
+    
+    // Setup countdown timer for time limit if specified
+    let countdownTimer: NodeJS.Timeout | null = null;
     if (timeLimitInMinutes > 0) {
-      setTestTimeLeft(timeLimitInMinutes * 60);
-      
-      // Clear any existing timer
+      let timeLeft = timeLimitInMinutes * 60;
+      countdownTimer = setInterval(() => {
+        timeLeft -= 1;
+        if (timeLeft <= 0) {
+          clearInterval(countdownTimer!);
+          onTimeUp();
+        }
+      }, 1000);
+    }
+    
+    return () => {
       if (testTimerRef.current) {
         clearInterval(testTimerRef.current);
+        testTimerRef.current = undefined;
       }
-      
-      testTimerRef.current = setInterval(() => {
-        setTestTimeLeft(prevTime => {
-          if (prevTime <= 1) {
-            clearInterval(testTimerRef.current!);
-            onTimeUp();
-            return 0;
-          }
-          return prevTime - 1;
-        });
-      }, 1000);
-      
-      return () => {
-        if (testTimerRef.current) {
-          clearInterval(testTimerRef.current);
-        }
-      };
-    } else {
-      // If no time limit, show unlimited time
-      setTestTimeLeft(0);
-    }
-  }, [timeLimitInMinutes, onTimeUp]);
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+      }
+    };
+  }, []); // Empty dependency array - only run once
+
+
 
   useEffect(() => {
-    // Reset local state when question changes
+    // Handle question timer when changing questions
+    if (isAnswered) {
+      // If question is already answered, show the frozen time and stop timer
+      setCurrentQuestionTime(questionTimes[currentQuestionIndex] || 0);
+      if (questionTimerRef.current) {
+        clearInterval(questionTimerRef.current);
+        questionTimerRef.current = undefined;
+      }
+    } else {
+      // For unanswered questions, start from saved time or 0
+      const savedTime = questionTimes[currentQuestionIndex] || 0;
+      setCurrentQuestionTime(savedTime);
+      
+      // Clear existing timer
+      if (questionTimerRef.current) {
+        clearInterval(questionTimerRef.current);
+      }
+      
+      // Start new timer
+      questionTimerRef.current = setInterval(() => {
+        setCurrentQuestionTime(prev => prev + 1);
+      }, 1000);
+    }
+
+    // Reset media state when question changes
     setMediaData(null);
     setEditableTranscription('');
-    setTextAnswer('');
     setIsRecording(false);
     setIsTranscribing(false);
-    setQuestionTime(0);
 
-    // Start question timer
-    clearInterval(questionTimerRef.current);
-    questionTimerRef.current = setInterval(() => {
-        setQuestionTime(prev => prev + 1);
-    }, 1000);
+    return () => {
+      if (questionTimerRef.current) {
+        clearInterval(questionTimerRef.current);
+      }
+    };
+  }, [currentQuestionIndex, isAnswered]); // Removed questionTimes from deps to avoid loops
 
-    return () => clearInterval(questionTimerRef.current);
-  }, [questionNumber]);
+  // Update question times in parent periodically using a debounced approach
+  useEffect(() => {
+    if (!isAnswered) {
+      const updateInterval = setInterval(() => {
+        const currentTimes = [...questionTimesRef.current];
+        currentTimes[currentQuestionIndex] = currentQuestionTime;
+        setQuestionTimes(currentTimes);
+      }, 2000); // Update every 2 seconds to reduce conflicts
+      
+      return () => clearInterval(updateInterval);
+    }
+  }, [currentQuestionTime, currentQuestionIndex, isAnswered, setQuestionTimes]);
+
+  // Separate effect to handle text answer loading - only when question or answer status changes
+  useEffect(() => {
+    if (isAnswered && conversationHistory[currentQuestionIndex]?.answer) {
+      setTextAnswer(conversationHistory[currentQuestionIndex].answer);
+    } else if (!isAnswered) {
+      setTextAnswer('');
+    }
+  }, [currentQuestionIndex, isAnswered, conversationHistory]);
 
 
   const handleRecordingComplete = (blob: Blob, dataUri: string) => {
@@ -157,6 +211,15 @@ const Flashcard: React.FC<FlashcardProps> = ({
   const handleSubmit = () => {
     if (mode === 'text') {
       if (textAnswer.trim()) {
+        // Stop the question timer when submitting and save the time
+        if (questionTimerRef.current) {
+          clearInterval(questionTimerRef.current);
+          questionTimerRef.current = undefined;
+        }
+        // Immediately update question times for this question
+        const currentTimes = [...questionTimesRef.current];
+        currentTimes[currentQuestionIndex] = currentQuestionTime;
+        setQuestionTimes(currentTimes);
         onAnswerSubmit(textAnswer);
       } else {
         toast({
@@ -167,6 +230,15 @@ const Flashcard: React.FC<FlashcardProps> = ({
       }
     } else {
       if (editableTranscription.trim() && mediaData) {
+        // Stop the question timer when submitting and save the time
+        if (questionTimerRef.current) {
+          clearInterval(questionTimerRef.current);
+          questionTimerRef.current = undefined;
+        }
+        // Immediately update question times for this question
+        const currentTimes = [...questionTimesRef.current];
+        currentTimes[currentQuestionIndex] = currentQuestionTime;
+        setQuestionTimes(currentTimes);
         onAnswerSubmit(editableTranscription, mediaData.dataUri);
       } else {
         toast({
@@ -240,20 +312,23 @@ const Flashcard: React.FC<FlashcardProps> = ({
                 <div className='h-6 w-6 rounded-full bg-red-500 flex items-center justify-center'>
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-timer"><line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="12" y1="6" y2="2"/><circle cx="12" cy="14" r="8"/></svg>
                 </div>
-                TEST TIME | {timeLimitInMinutes > 0 ? formatTime(testTimeLeft) : 'Unlimited'}
+                TEST TIME | {formatTime(testTimeElapsed)}
               </div>
-              <div className='bg-red-500 hover:bg-red-600 rounded-full px-4 py-1 h-auto text-white flex items-center gap-2'>
-                <Button onClick={onFinishInterview} variant="ghost" size="sm" className="text-white hover:bg-red-700 p-0 h-auto">
-                    Finish
-                </Button>
-                <Switch checked={false} className="data-[state=checked]:bg-white data-[state=unchecked]:bg-white [&>span]:bg-red-500" />
-              </div>
+              <Button 
+                onClick={() => {
+                  console.log('🔴 Finish button clicked in Flashcard');
+                  onFinishInterview();
+                }} 
+                className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md font-medium"
+              >
+                Finish Test
+              </Button>
             </div>
           </div>
            <div className="bg-gray-100 border-b border-gray-300 p-2 flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm font-semibold ml-4">
                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                    Question Time | {formatTime(questionTime)}
+                    Question Time | {formatTime(currentQuestionTime)}
                 </div>
                 <Button variant="outline" className="bg-orange-400 hover:bg-orange-500 text-white rounded-full border-orange-500 px-4 py-1 h-auto" onClick={() => setShowInstructions(true)}>
                     Instruction <Info className="ml-2 h-4 w-4" />
@@ -275,15 +350,16 @@ const Flashcard: React.FC<FlashcardProps> = ({
                 <div className="space-y-2 flex-grow flex flex-col">
                     <div className="flex items-center text-gray-500 mb-2">
                         <Type className="h-5 w-5 mr-2" />
-                        <span>Type your answer below:</span>
+                        <span>{isAnswered ? 'Your submitted answer:' : 'Type your answer below:'}</span>
                     </div>
                     <Textarea 
-                        value={textAnswer}
+                        value={isAnswered ? conversationHistory[currentQuestionIndex]?.answer || '' : textAnswer}
                         onChange={(e) => setTextAnswer(e.target.value)}
-                        placeholder="Your answer..."
+                        placeholder={isAnswered ? "Your submitted answer" : "Your answer..."}
                         rows={8}
-                        className="bg-gray-50 flex-grow"
+                        className={`flex-grow ${isAnswered ? 'bg-gray-100 border-gray-300' : 'bg-gray-50'}`}
                         disabled={isAnswered}
+                        readOnly={isAnswered}
                     />
                 </div>
             ) : (
@@ -371,7 +447,8 @@ const Flashcard: React.FC<FlashcardProps> = ({
                 <li>• Use the numbered buttons to navigate between questions</li>
                 <li>• Green numbers indicate answered questions</li>
                 <li>• You can review and change your answers before finishing</li>
-                <li>• {timeLimitInMinutes > 0 ? `The timer shows your remaining test time (${timeLimitInMinutes} minutes total)` : 'This test has no time limit'}</li>
+                <li>• {timeLimitInMinutes > 0 ? `This test has a ${timeLimitInMinutes} minute time limit (you'll be automatically finished when time runs out)` : 'This test has no time limit'}</li>
+                <li>• The timer shows how long you've been taking the test</li>
               </ul>
             </div>
             

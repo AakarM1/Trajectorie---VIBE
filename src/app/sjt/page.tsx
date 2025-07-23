@@ -63,6 +63,7 @@ function SJTInterviewPage() {
   const [sjtScenarios, setSjtScenarios] = useState<Scenario[]>(fallbackSjtScenarios);
   const [timeLimit, setTimeLimit] = useState(0); // in minutes
   const [showReport, setShowReport] = useState(true);
+  const [questionTimes, setQuestionTimes] = useState<number[]>([]); // Track time per question
 
 
   const startInterview = useCallback(async (details: PreInterviewDetails) => {
@@ -139,10 +140,16 @@ function SJTInterviewPage() {
       videoDataUri: undefined 
     }));
     setConversationHistory(history);
+    
+    // Initialize question times array
+    setQuestionTimes(new Array(scenariosToUse.length).fill(0));
+    
     setIsProcessing(false);
   }, [toast]);
 
   const handleFinishInterview = useCallback(async () => {
+      console.log('🏁 Finish button clicked');
+      
       const answeredHistory = conversationHistory.filter(e => e.answer);
       if (answeredHistory.length === 0) {
           toast({
@@ -152,63 +159,122 @@ function SJTInterviewPage() {
           });
           return;
       }
+      
+      console.log(`📊 Processing ${answeredHistory.length} answers`);
       setStatus('ANALYZING');
       setIsProcessing(true);
+      
       try {
-        const sjtAnalyses: (AnalyzeSJTResponseOutput & { competency: string })[] = [];
-
-        // Analyze each response individually
-        for (let i = 0; i < conversationHistory.length; i++) {
-          const entry = conversationHistory[i];
-          if (entry.answer) {
-            const scenario = sjtScenarios[i];
-            const analysisInput: AnalyzeSJTResponseInput = {
-                situation: scenario.situation,
-                question: scenario.question,
-                bestResponseRationale: scenario.bestResponseRationale,
-                worstResponseRationale: scenario.worstResponseRationale,
-                assessedCompetency: scenario.assessedCompetency,
-                candidateAnswer: entry.answer,
-            };
-            const result = await fetch('/api/ai/analyze-sjt', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(analysisInput)
-            }).then(res => res.json());
-            sjtAnalyses.push({ ...result, competency: scenario.assessedCompetency });
-          }
-        }
+        // First, save the submission to database immediately
+        console.log('💾 Saving submission to database...');
         
-        // Aggregate results into the standard AnalysisResult format
-        const aggregatedResult: AnalysisResult = {
-            strengths: "The candidate's performance in situational judgement tests reveals several key strengths. " + sjtAnalyses.filter(a => a.score >= 7).map(a => a.rationale).join(' '),
-            weaknesses: "Areas for improvement were also noted. " + sjtAnalyses.filter(a => a.score < 7).map(a => a.rationale).join(' '),
-            summary: `The candidate completed ${sjtAnalyses.length} of ${sjtScenarios.length} scenarios. The average competency score was ${(sjtAnalyses.reduce((acc, a) => acc + a.score, 0) / (sjtAnalyses.length || 1)).toFixed(1)}/10. Please review individual scores and rationales for detailed insights.`,
+        // Create a basic result structure
+        const basicResult: AnalysisResult = {
+            strengths: `Candidate completed ${answeredHistory.length} out of ${sjtScenarios.length} scenarios. Responses demonstrate engagement with the situational judgement test.`,
+            weaknesses: "Detailed analysis pending. Please review individual responses for comprehensive feedback.",
+            summary: `SJT Assessment completed on ${new Date().toLocaleDateString()}. ${answeredHistory.length} scenarios answered out of ${sjtScenarios.length} total scenarios.`,
             competencyAnalysis: [{
-                name: "Situational Competencies",
-                competencies: sjtAnalyses.map((a) => ({
-                    name: a.competency,
-                    score: a.score
-                })).sort((a,b) => a.name.localeCompare(b.name)), // Alpha sort competencies
+                name: "SJT Completion",
+                competencies: [{
+                    name: "Participation",
+                    score: Math.round((answeredHistory.length / sjtScenarios.length) * 10)
+                }]
             }]
         };
 
-        setAnalysisResult(aggregatedResult);
-
-        saveSubmission({
+        // Save submission immediately with basic analysis
+        await saveSubmission({
             candidateName: preInterviewDetails!.name,
             testType: 'SJT',
-            report: aggregatedResult,
+            report: basicResult,
             history: conversationHistory,
         });
 
+        console.log('✅ Submission saved successfully');
+
+        // Try AI analysis in background (optional - won't crash if it fails)
+        try {
+          console.log('🤖 Attempting AI analysis...');
+          const sjtAnalyses: (any & { competency: string })[] = [];
+
+          // Analyze each response individually
+          for (let i = 0; i < answeredHistory.length; i++) {
+            const entry = answeredHistory[i];
+            const scenarioIndex = conversationHistory.findIndex(h => h === entry);
+            const scenario = sjtScenarios[scenarioIndex];
+            
+            if (scenario) {
+              const analysisInput = {
+                  situation: scenario.situation,
+                  question: scenario.question,
+                  bestResponseRationale: scenario.bestResponseRationale,
+                  worstResponseRationale: scenario.worstResponseRationale,
+                  assessedCompetency: scenario.assessedCompetency,
+                  candidateAnswer: entry.answer,
+              };
+              
+              try {
+                const result = await fetch('/api/ai/analyze-sjt', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(analysisInput),
+                    signal: AbortSignal.timeout(10000) // 10 second timeout
+                }).then(res => {
+                  if (!res.ok) throw new Error(`API responded with ${res.status}`);
+                  return res.json();
+                });
+                sjtAnalyses.push({ ...result, competency: scenario.assessedCompetency });
+                console.log(`✅ Analysis complete for scenario ${i + 1}`);
+              } catch (analysisError) {
+                console.warn(`⚠️ Failed to analyze scenario ${i + 1}:`, analysisError);
+                // Continue with next scenario instead of crashing
+              }
+            }
+          }
+          
+          // If we got some AI analyses, update the result
+          if (sjtAnalyses.length > 0) {
+            const enhancedResult: AnalysisResult = {
+                strengths: "The candidate's performance in situational judgement tests reveals several key strengths. " + sjtAnalyses.filter(a => a.score >= 7).map(a => a.rationale).join(' '),
+                weaknesses: "Areas for improvement were also noted. " + sjtAnalyses.filter(a => a.score < 7).map(a => a.rationale).join(' '),
+                summary: `The candidate completed ${sjtAnalyses.length} of ${sjtScenarios.length} scenarios with AI analysis. The average competency score was ${(sjtAnalyses.reduce((acc, a) => acc + a.score, 0) / (sjtAnalyses.length || 1)).toFixed(1)}/10.`,
+                competencyAnalysis: [{
+                    name: "Situational Competencies",
+                    competencies: sjtAnalyses.map((a) => ({
+                        name: a.competency,
+                        score: a.score
+                    })).sort((a,b) => a.name.localeCompare(b.name)),
+                }]
+            };
+            setAnalysisResult(enhancedResult);
+            console.log('✅ AI analysis completed successfully');
+          } else {
+            setAnalysisResult(basicResult);
+            console.log('⚠️ No AI analysis available, using basic result');
+          }
+        } catch (aiError) {
+          console.warn('⚠️ AI analysis failed, but submission was saved:', aiError);
+          setAnalysisResult(basicResult);
+        }
+
         setStatus(showReport ? 'RESULTS' : 'COMPLETED');
+        toast({
+          title: 'Test Completed!',
+          description: 'Your responses have been saved successfully.',
+        });
+        
+        // Redirect to home page after a short delay
+        setTimeout(() => {
+          console.log('🏠 Redirecting to home page');
+          router.push('/');
+        }, 2000);
+        
       } catch (error) {
-        console.error("Error analyzing SJT responses:", error);
+        console.error("❌ Error in finish interview:", error);
         toast({
           variant: 'destructive',
-          title: 'Analysis Failed',
-          description: 'There was an error analyzing your responses. Please try again.',
+          title: 'Submission Failed',
+          description: 'There was an error saving your responses. Please try again.',
         });
         setStatus('INTERVIEW');
       } finally {
@@ -282,6 +348,8 @@ function SJTInterviewPage() {
               currentQuestionIndex={currentQuestionIndex}
               setCurrentQuestionIndex={setCurrentQuestionIndex}
               conversationHistory={conversationHistory}
+              questionTimes={questionTimes}
+              setQuestionTimes={setQuestionTimes}
             />
           </div>
         );
