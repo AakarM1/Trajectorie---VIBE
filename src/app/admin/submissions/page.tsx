@@ -29,37 +29,80 @@ import JSZip from 'jszip';
 
 const SubmissionsPage = () => {
     const [submissions, setSubmissions] = useState<Submission[]>([]);
-    const { getSubmissions, deleteSubmission, clearAllSubmissions } = useAuth();
+    const { getSubmissions, deleteSubmission, clearAllSubmissions, onSubmissionsChange } = useAuth();
     const { toast } = useToast();
     const [selectedSubmissions, setSelectedSubmissions] = useState<Record<string, boolean>>({});
     const [downloadTypes, setDownloadTypes] = useState({ video: false, audio: false, text: false });
     const [isDownloading, setIsDownloading] = useState(false);
+    const [isLoadingInitial, setIsLoadingInitial] = useState(true);
 
-    const fetchSubmissions = () => {
-        const data = getSubmissions();
-        setSubmissions(data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+    const fetchSubmissions = async () => {
+        try {
+            const data = await getSubmissions();
+            setSubmissions(data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+            setIsLoadingInitial(false);
+        } catch (error) {
+            console.error('Error fetching submissions:', error);
+            toast({
+                variant: 'destructive',
+                title: 'Error loading submissions',
+                description: 'Failed to load submissions from the database.'
+            });
+            setIsLoadingInitial(false);
+        }
     };
 
     useEffect(() => {
-        fetchSubmissions();
-    }, []);
-
-    const handleDelete = (id: string) => {
-        deleteSubmission(id);
-        fetchSubmissions();
-        toast({
-            title: 'Submission Deleted',
-            description: 'The selected interview report has been removed.',
+        console.log('🔄 Setting up real-time submissions listener');
+        
+        // Set up real-time listener
+        const unsubscribe = onSubmissionsChange((realtimeSubmissions) => {
+            console.log(`🔄 Real-time update received: ${realtimeSubmissions.length} submissions`);
+            setSubmissions(realtimeSubmissions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+            setIsLoadingInitial(false);
         });
+
+        // Cleanup listener on unmount
+        return () => {
+            console.log('🔄 Cleaning up real-time submissions listener');
+            unsubscribe();
+        };
+    }, [onSubmissionsChange]);
+
+    const handleDelete = async (id: string) => {
+        try {
+            await deleteSubmission(id);
+            // No need to call fetchSubmissions - real-time listener will update
+            toast({
+                title: 'Submission Deleted',
+                description: 'The selected interview report has been removed.',
+            });
+        } catch (error) {
+            console.error('Error deleting submission:', error);
+            toast({
+                variant: 'destructive',
+                title: 'Error deleting submission',
+                description: 'Failed to delete the submission.'
+            });
+        }
     }
 
-    const handleClearAll = () => {
-        clearAllSubmissions();
-        fetchSubmissions();
-        toast({
-            title: 'All Submissions Cleared',
-            description: 'The submissions list is now empty.',
-        });
+    const handleClearAll = async () => {
+        try {
+            await clearAllSubmissions();
+            // No need to call fetchSubmissions - real-time listener will update
+            toast({
+                title: 'All Submissions Cleared',
+                description: 'The submissions list is now empty.',
+            });
+        } catch (error) {
+            console.error('Error clearing submissions:', error);
+            toast({
+                variant: 'destructive',
+                title: 'Error clearing submissions',
+                description: 'Failed to clear all submissions.'
+            });
+        }
     }
 
     const handleDownloadSelected = async () => {
@@ -101,15 +144,41 @@ const SubmissionsPage = () => {
 
             for (const [index, entry] of sub.history.entries()) {
                 if (entry.videoDataUri) {
-                    const isVideo = entry.videoDataUri.startsWith('data:video');
+                    // Check if it's a data URI or Firebase Storage URL
+                    const isDataUri = entry.videoDataUri.startsWith('data:');
+                    const isVideo = isDataUri 
+                      ? entry.videoDataUri.startsWith('data:video')
+                      : entry.videoDataUri.includes('video') || entry.videoDataUri.includes('Q') && entry.videoDataUri.includes('_video');
+                    
                     if ((isVideo && downloadTypes.video) || (!isVideo && downloadTypes.audio)) {
                         try {
-                            const response = await fetch(entry.videoDataUri);
-                            const blob = await response.blob();
-                            const extension = isVideo ? 'webm' : 'webm';
+                            let blob: Blob;
+                            let extension = 'webm';
+                            
+                            if (isDataUri) {
+                                // Handle data URI (original format)
+                                const response = await fetch(entry.videoDataUri);
+                                blob = await response.blob();
+                            } else {
+                                // Handle Firebase Storage URL
+                                console.log(`📥 Downloading media from Firebase Storage: ${entry.videoDataUri}`);
+                                const response = await fetch(entry.videoDataUri);
+                                if (!response.ok) {
+                                    throw new Error(`Failed to fetch from storage: ${response.statusText}`);
+                                }
+                                blob = await response.blob();
+                                
+                                // Try to get extension from URL or blob type
+                                const urlParts = entry.videoDataUri.split('.');
+                                if (urlParts.length > 1) {
+                                    extension = urlParts[urlParts.length - 1].split('?')[0]; // Remove query params
+                                }
+                            }
+                            
                             candidateFolder.file(`Q${index + 1}_${isVideo ? 'video' : 'audio'}.${extension}`, blob);
                         } catch (e) {
-                            console.error("Could not fetch data URI", e);
+                            console.error(`Could not fetch media file for Q${index + 1}:`, e);
+                            // Continue with other files even if one fails
                         }
                     }
                 }
@@ -196,9 +265,15 @@ const SubmissionsPage = () => {
                     <Card className="bg-card/60 backdrop-blur-xl">
                         <CardHeader className="flex flex-row items-start justify-between">
                            <div>
-                            <CardTitle>All Submissions</CardTitle>
+                            <CardTitle className="flex items-center gap-2">
+                                All Submissions
+                                <div className="flex items-center gap-1 text-xs text-green-600">
+                                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                    Live
+                                </div>
+                            </CardTitle>
                                 <CardDescription>
-                                    Click on a row to view the detailed report for each submission.
+                                    Click on a row to view the detailed report for each submission. Updates automatically when new submissions are added.
                                 </CardDescription>
                            </div>
                              <AlertDialog>
@@ -242,7 +317,16 @@ const SubmissionsPage = () => {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {submissions.length > 0 ? (
+                                    {isLoadingInitial ? (
+                                        <TableRow>
+                                            <TableCell colSpan={5} className="text-center py-8">
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <Loader2 className="h-5 w-5 animate-spin" />
+                                                    Loading submissions...
+                                                </div>
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : submissions.length > 0 ? (
                                         submissions.map((sub) => (
                                             <TableRow key={sub.id}>
                                                 <TableCell>
