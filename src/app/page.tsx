@@ -3,10 +3,11 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { ProtectedRoute, useAuth } from '@/contexts/auth-context';
 import Header from '@/components/header';
 import Image from 'next/image';
-import { ArrowRightCircle, Headphones, ListChecks, Info, FileText, Briefcase, X } from 'lucide-react';
+import { ArrowRightCircle, Headphones, ListChecks, Info, FileText, Briefcase, X, Eye } from 'lucide-react';
 import { configurationService } from '@/lib/config-service';
 
 const Stepper = () => (
@@ -48,7 +49,9 @@ const AssessmentCard = ({
   link, 
   isDisabled = false, 
   currentAttempts = 0,
-  maxAttempts = 1 
+  maxAttempts = 1,
+  hasReport = false,
+  onViewReport
 }: { 
   title: string; 
   icon: React.ReactNode; 
@@ -61,6 +64,8 @@ const AssessmentCard = ({
   isDisabled?: boolean; 
   currentAttempts?: number;
   maxAttempts?: number;
+  hasReport?: boolean;
+  onViewReport?: () => void;
 }) => (
     <div className={`border border-gray-200 flex flex-col rounded-xl overflow-hidden shadow-lg hover:shadow-2xl transition-shadow duration-300 ${isDisabled ? 'opacity-50 bg-gray-50' : ''}`}>
         <div className="p-4 flex-grow">
@@ -96,23 +101,46 @@ const AssessmentCard = ({
             </div>
         </div>
         {isDisabled ? (
-          <div className="w-full bg-gray-400 text-white font-bold py-3 flex items-center justify-center cursor-not-allowed">
-            <X className="mr-2 h-5 w-5" />
-            Maximum attempts reached
+          <div className="bg-gray-50">
+            <div className="w-full bg-gray-400 text-white font-bold py-3 flex items-center justify-center cursor-not-allowed">
+              <X className="mr-2 h-5 w-5" />
+              Maximum attempts reached
+            </div>
+            {hasReport && (
+              <button 
+                onClick={onViewReport}
+                className="w-full bg-blue-600 text-white font-bold py-3 flex items-center justify-center hover:bg-blue-700 transition-colors border-t border-gray-300"
+              >
+                <Eye className="mr-2 h-5 w-5" />
+                View Report
+              </button>
+            )}
           </div>
         ) : (
-          <Link href={link} className="block">
-              <button className="w-full bg-green-600 text-white font-bold py-3 flex items-center justify-center hover:bg-green-700 transition-colors">
-                  Start <ArrowRightCircle className="ml-3" />
+          <div className="bg-gray-50">
+            <Link href={link} className="block">
+                <button className="w-full bg-green-600 text-white font-bold py-3 flex items-center justify-center hover:bg-green-700 transition-colors">
+                    Start <ArrowRightCircle className="ml-3" />
+                </button>
+            </Link>
+            {hasReport && (
+              <button 
+                onClick={onViewReport}
+                className="w-full bg-blue-600 text-white font-bold py-3 flex items-center justify-center hover:bg-blue-700 transition-colors border-t border-gray-300"
+              >
+                <Eye className="mr-2 h-5 w-5" />
+                View Report
               </button>
-          </Link>
+            )}
+          </div>
         )}
     </div>
 );
 
 
 function SelectionPage() {
-  const { getUserAttempts } = useAuth();
+  const router = useRouter();
+  const { getUserAttempts, getLatestUserSubmission } = useAuth();
   const [isJdtEnabled, setIsJdtEnabled] = useState(true);
   const [isSjtEnabled, setIsSjtEnabled] = useState(true);
   const [isJdtConfigured, setIsJdtConfigured] = useState(false);
@@ -120,6 +148,8 @@ function SelectionPage() {
   const [loading, setLoading] = useState(true);
   const [sjtAttempts, setSjtAttempts] = useState(0);
   const [jdtAttempts, setJdtAttempts] = useState(0);
+  const [hasJdtReport, setHasJdtReport] = useState(false);
+  const [hasSjtReport, setHasSjtReport] = useState(false);
   
   const MAX_ATTEMPTS = 1; // Maximum attempts per test
 
@@ -146,8 +176,15 @@ function SelectionPage() {
         setSjtAttempts(sjtAttemptsCount);
         setJdtAttempts(jdtAttemptsCount);
         
+        // Check for existing reports
+        const sjtSubmission = await getLatestUserSubmission('SJT');
+        const jdtSubmission = await getLatestUserSubmission('JDT');
+        setHasSjtReport(!!sjtSubmission);
+        setHasJdtReport(!!jdtSubmission);
+        
         console.log('✅ Configuration loaded from database');
         console.log(`📊 Attempts - SJT: ${sjtAttemptsCount}/${MAX_ATTEMPTS}, JDT: ${jdtAttemptsCount}/${MAX_ATTEMPTS}`);
+        console.log(`📄 Reports - SJT: ${!!sjtSubmission}, JDT: ${!!jdtSubmission}`);
       } catch (error) {
         console.error('❌ Error loading configuration from database:', error);
       } finally {
@@ -160,6 +197,14 @@ function SelectionPage() {
 
   const showJDT = isJdtEnabled && isJdtConfigured;
   const showSJT = isSjtEnabled && isSjtConfigured;
+
+  const handleViewSjtReport = () => {
+    router.push('/report/SJT');
+  };
+
+  const handleViewJdtReport = () => {
+    router.push('/report/JDT');
+  };
 
   return (
     <div className="flex flex-col min-h-screen bg-white">
@@ -200,6 +245,8 @@ function SelectionPage() {
                                 isDisabled={sjtAttempts >= MAX_ATTEMPTS}
                                 currentAttempts={sjtAttempts}
                                 maxAttempts={MAX_ATTEMPTS}
+                                hasReport={hasSjtReport}
+                                onViewReport={handleViewSjtReport}
                             />
                         )}
                         {showJDT && (
@@ -215,6 +262,8 @@ function SelectionPage() {
                                 isDisabled={jdtAttempts >= MAX_ATTEMPTS}
                                 currentAttempts={jdtAttempts}
                                 maxAttempts={MAX_ATTEMPTS}
+                                hasReport={hasJdtReport}
+                                onViewReport={handleViewJdtReport}
                             />
                         )}
                     </div>

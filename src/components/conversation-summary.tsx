@@ -125,23 +125,56 @@ const ConversationSummary: React.FC<ConversationSummaryProps> = ({ analysisResul
         };
 
         const drawWrappedText = (text: string, font: PDFFont, size: number, x: number, maxWidth: number, color: any, lineHeight: number) => {
-            const words = text.split(' ');
-            let line = '';
-            for(const word of words) {
-                const testLine = line + word + ' ';
-                const testWidth = font.widthOfTextAtSize(testLine, size);
-                if (testWidth > maxWidth) {
-                    checkY(lineHeight);
-                    page.drawText(line, { x, y, font, size, color });
-                    y -= lineHeight;
-                    line = word + ' ';
-                } else {
-                    line = testLine;
+            // Clean text to remove problematic characters and normalize newlines
+            const cleanText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            
+            // Split by newlines first to handle paragraph breaks
+            const paragraphs = cleanText.split('\n');
+            
+            paragraphs.forEach((paragraph, paragraphIndex) => {
+                // Skip empty paragraphs but add some space
+                if (paragraph.trim() === '') {
+                    if (paragraphIndex > 0) {
+                        y -= lineHeight * 0.5; // Half line for paragraph spacing
+                    }
+                    return;
                 }
-            }
-            checkY(lineHeight);
-            page.drawText(line, { x, y, font, size, color });
-            y -= lineHeight;
+                
+                // Process each paragraph for word wrapping
+                const words = paragraph.trim().split(' ');
+                let line = '';
+                
+                for(const word of words) {
+                    const testLine = line + word + ' ';
+                    try {
+                        const testWidth = font.widthOfTextAtSize(testLine, size);
+                        if (testWidth > maxWidth && line !== '') {
+                            checkY(lineHeight);
+                            page.drawText(line.trim(), { x, y, font, size, color });
+                            y -= lineHeight;
+                            line = word + ' ';
+                        } else {
+                            line = testLine;
+                        }
+                    } catch (error) {
+                        // If we can't measure the text, just add the word and continue
+                        console.warn('Error measuring text width:', error);
+                        line = testLine;
+                    }
+                }
+                
+                // Draw the remaining line
+                if (line.trim() !== '') {
+                    checkY(lineHeight);
+                    page.drawText(line.trim(), { x, y, font, size, color });
+                    y -= lineHeight;
+                }
+                
+                // Add extra space between paragraphs (except for the last one)
+                if (paragraphIndex < paragraphs.length - 1) {
+                    y -= lineHeight * 0.3;
+                }
+            });
         }
 
         // Title with Logo
@@ -336,11 +369,6 @@ const ConversationSummary: React.FC<ConversationSummaryProps> = ({ analysisResul
                 <Button onClick={onReattempt} variant="outline">
                     <RefreshCcw className="mr-2 h-4 w-4" /> {reattemptText}
                 </Button>
-                {isAdminView && (
-                    <Link href="/admin" className={cn(buttonVariants({ variant: 'default' }))}>
-                        Back to Dashboard
-                    </Link>
-                )}
               </div>
           </CardFooter>
       </Card>

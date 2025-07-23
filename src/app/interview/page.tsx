@@ -269,12 +269,6 @@ function VerbalInterviewPage() {
           title: 'Interview Completed!',
           description: 'Your responses have been saved successfully.',
         });
-        
-        // Redirect to home page after a short delay
-        setTimeout(() => {
-          console.log('🏠 Redirecting to home page');
-          router.push('/');
-        }, 2000);
 
       } catch (error) {
         console.error("❌ Error in finish interview:", error);

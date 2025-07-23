@@ -41,6 +41,7 @@ interface AuthContextType {
   // Attempt tracking
   getUserAttempts: (testType: 'JDT' | 'SJT') => Promise<number>;
   canUserTakeTest: (testType: 'JDT' | 'SJT', maxAttempts: number) => Promise<boolean>;
+  getLatestUserSubmission: (testType: 'JDT' | 'SJT') => Promise<Submission | null>;
   // Real-time listeners
   onSubmissionsChange: (callback: (submissions: Submission[]) => void) => () => void;
 }
@@ -440,6 +441,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return currentAttempts < maxAttempts;
   };
 
+  // Get the latest user submission for a specific test type
+  const getLatestUserSubmission = async (testType: 'JDT' | 'SJT'): Promise<Submission | null> => {
+    if (!user) return null;
+    
+    try {
+      const submissions = await getSubmissions();
+      const userSubmissions = submissions.filter(
+        s => s.candidateId === user.candidateId && s.testType === testType
+      );
+      
+      if (userSubmissions.length === 0) return null;
+      
+      // Sort by date and return the latest
+      userSubmissions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      return userSubmissions[0];
+    } catch (error) {
+      console.error('Error getting latest user submission:', error);
+      return null;
+    }
+  };
+
   const value: AuthContextType = {
     user,
     login,
@@ -456,6 +478,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     updateUser,
     getUserAttempts,
     canUserTakeTest,
+    getLatestUserSubmission,
     onSubmissionsChange
   };
 
