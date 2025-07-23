@@ -62,6 +62,40 @@ const CompetencyChart = ({ metaCompetency }: { metaCompetency: MetaCompetency })
 
 
 const ConversationSummary: React.FC<ConversationSummaryProps> = ({ analysisResult, history, onReattempt, reattemptText = "Re-attempt" }) => {
+  // Add debugging logs to understand the structure
+  console.log('🔍 ConversationSummary received analysisResult:', analysisResult);
+  console.log('🔍 Type of analysisResult:', typeof analysisResult);
+  console.log('🔍 Keys in analysisResult:', analysisResult ? Object.keys(analysisResult) : 'null/undefined');
+  
+  // Add defensive checks for analysisResult structure
+  if (!analysisResult) {
+    return (
+      <div className="max-w-4xl mx-auto p-6 space-y-6">
+        <div className="text-center text-red-600">
+          <h2 className="text-2xl font-bold mb-4">Analysis Result Missing</h2>
+          <p>The analysis result is not available. Please try submitting again.</p>
+          <Button onClick={onReattempt} className="mt-4">
+            {reattemptText}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!analysisResult.competencyAnalysis) {
+    console.error('❌ Missing competencyAnalysis in analysisResult:', analysisResult);
+    return (
+      <div className="max-w-4xl mx-auto p-6 space-y-6">
+        <div className="text-center text-red-600">
+          <h2 className="text-2xl font-bold mb-4">Analysis Data Incomplete</h2>
+          <p>The competency analysis data is missing. Please try submitting again.</p>
+          <Button onClick={onReattempt} className="mt-4">
+            {reattemptText}
+          </Button>
+        </div>
+      </div>
+    );
+  }
   const { toast } = useToast();
   const [isGeneratingPdf, setIsGeneratingPdf] = React.useState(false);
   const isAdminView = reattemptText !== "Re-attempt";
@@ -156,7 +190,7 @@ const ConversationSummary: React.FC<ConversationSummaryProps> = ({ analysisResul
         page.drawText('Competency Scores', { x: PADDING, y, font: helveticaBoldFont, size: 16 });
         y -= 20;
 
-        analysisResult.competencyAnalysis.forEach(meta => {
+        analysisResult.competencyAnalysis?.forEach(meta => {
             checkY(20);
             page.drawText(meta.name, { x: PADDING, y, font: helveticaBoldFont, size: 12 });
             y -= 15;
@@ -233,9 +267,11 @@ const ConversationSummary: React.FC<ConversationSummaryProps> = ({ analysisResul
                 Competency Scores
                 </h3>
                 <div className="p-4 border rounded-lg bg-secondary/30 shadow-inner">
-                {analysisResult.competencyAnalysis.map(mc => (
+                {analysisResult.competencyAnalysis?.map(mc => (
                     <CompetencyChart key={mc.name} metaCompetency={mc} />
-                ))}
+                )) || (
+                    <p className="text-muted-foreground">No competency analysis available.</p>
+                )}
                 </div>
             </div>
             <div className="space-y-4">
