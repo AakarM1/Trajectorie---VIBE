@@ -30,34 +30,38 @@ const FinalVerdictPage = () => {
     const [verdict, setVerdict] = useState<GenerateFinalVerdictOutput | null>(null);
 
     useEffect(() => {
-        const allSubmissions = getSubmissions();
-        const submissionsByName = allSubmissions.reduce((acc, sub) => {
-            if (!acc[sub.candidateName]) {
-                acc[sub.candidateName] = [];
-            }
-            acc[sub.candidateName].push(sub);
-            return acc;
-        }, {} as Record<string, Submission[]>);
+        const loadData = async () => {
+            const allSubmissions = await getSubmissions();
+            const submissionsByName = allSubmissions.reduce((acc: Record<string, Submission[]>, sub: Submission) => {
+                if (!acc[sub.candidateName]) {
+                    acc[sub.candidateName] = [];
+                }
+                acc[sub.candidateName].push(sub);
+                return acc;
+            }, {} as Record<string, Submission[]>);
 
-        const eligibleCandidates: CandidateWithReports[] = [];
-        for (const name in submissionsByName) {
-            const latestJDT = submissionsByName[name]
-                .filter(s => s.testType === 'JDT')
-                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-            
-            const latestSJT = submissionsByName[name]
-                .filter(s => s.testType === 'SJT')
-                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+            const eligibleCandidates: CandidateWithReports[] = [];
+            for (const name in submissionsByName) {
+                const latestJDT = submissionsByName[name]
+                    .filter((s: Submission) => s.testType === 'JDT')
+                    .sort((a: Submission, b: Submission) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+                
+                const latestSJT = submissionsByName[name]
+                    .filter((s: Submission) => s.testType === 'SJT')
+                    .sort((a: Submission, b: Submission) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
 
-            if (latestJDT && latestSJT) {
-                eligibleCandidates.push({
-                    name,
-                    jdtReport: latestJDT,
-                    sjtReport: latestSJT
-                });
+                if (latestJDT && latestSJT) {
+                    eligibleCandidates.push({
+                        name,
+                        jdtReport: latestJDT,
+                        sjtReport: latestSJT
+                    });
+                }
             }
-        }
-        setCandidates(eligibleCandidates);
+            setCandidates(eligibleCandidates);
+        };
+        
+        loadData();
     }, [getSubmissions]);
 
     const handleSelectCandidate = (candidateName: string) => {

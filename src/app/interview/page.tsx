@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { ProtectedRoute, useAuth } from '@/contexts/auth-context';
-import type { ConversationEntry, AnalysisResult, PreInterviewDetails, InterviewMode } from '@/types';
+import type { ConversationEntry, AnalysisResult, PreInterviewDetails, InterviewMode, Submission } from '@/types';
 import type { AnalyzeConversationInput } from '@/ai/flows/analyze-conversation';
 import type { GenerateInterviewQuestionsInput } from '@/ai/flows/generate-follow-up-questions';
 import Flashcard from '@/components/flashcard';
@@ -20,11 +20,11 @@ const GLOBAL_SETTINGS_KEY = 'global-settings';
 
 
 function VerbalInterviewPage() {
-  const { user, saveSubmission, canUserTakeTest } = useAuth();
+  const { user, saveSubmission, canUserTakeTest, getSubmissions } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
 
-  const [status, setStatus] = useState<'PRE_INTERVIEW' | 'INTERVIEW' | 'ANALYZING' | 'RESULTS' | 'COMPLETED'>('PRE_INTERVIEW');
+  const [status, setStatus] = useState<'PRE_INTERVIEW' | 'INTERVIEW' | 'RESULTS' | 'COMPLETED'>('PRE_INTERVIEW');
   const [interviewMode, setInterviewMode] = useState<InterviewMode>('video');
   const [preInterviewDetails, setPreInterviewDetails] = useState<PreInterviewDetails | null>(null);
   const [conversationHistory, setConversationHistory] = useState<ConversationEntry[]>([]);
@@ -201,7 +201,7 @@ function VerbalInterviewPage() {
       }
       
       console.log(`📊 Processing ${answeredHistory.length} answers`);
-      setStatus('ANALYZING');
+      setStatus('COMPLETED'); // Set status immediately to avoid loading screen
       setIsProcessing(true);
       
       try {
@@ -232,42 +232,12 @@ function VerbalInterviewPage() {
 
         console.log('✅ Interview submission saved successfully');
 
-        // Try AI analysis in background (optional - won't crash if it fails)
-        try {
-          console.log('🤖 Attempting AI analysis for interview...');
-          const analysisInput = {
-            conversationHistory: answeredHistory.map(h => ({
-                question: h.question,
-                answer: h.answer!,
-                preferredAnswer: h.preferredAnswer,
-                competency: h.competency
-            })),
-            name: preInterviewDetails!.name,
-            roleCategory: preInterviewDetails!.roleCategory,
-            jobDescription: jobDescription,
-          };
-          
-          const result = await fetch('/api/ai/analyze-conversation', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(analysisInput),
-              signal: AbortSignal.timeout(15000) // 15 second timeout
-          }).then(res => {
-            if (!res.ok) throw new Error(`API responded with ${res.status}`);
-            return res.json();
-          });
-          
-          setAnalysisResult(result);
-          console.log('✅ AI analysis completed successfully for interview');
-        } catch (aiError) {
-          console.warn('⚠️ AI analysis failed for interview, but submission was saved:', aiError);
-          setAnalysisResult(basicResult);
-        }
-        
-        setStatus(showReport ? 'RESULTS' : 'COMPLETED');
+        // Note: We remove background analysis triggering here since it will happen from admin side
+
+        // Show completion immediately
         toast({
-          title: 'Interview Completed!',
-          description: 'Your responses have been saved successfully.',
+          title: 'Thank you for your submission!',
+          description: 'The hiring team will get back to you with the next steps.',
         });
 
       } catch (error) {
@@ -357,14 +327,6 @@ function VerbalInterviewPage() {
             />
           </div>
         );
-      case 'ANALYZING':
-        return (
-          <div className="flex flex-col items-center justify-center text-center p-8 bg-card/60 backdrop-blur-xl rounded-lg shadow-lg">
-            <Loader2 className="h-16 w-16 animate-spin text-primary mb-4" />
-            <h2 className="text-2xl font-headline text-primary">Analyzing your conversation...</h2>
-            <p className="text-muted-foreground mt-2">This may take a moment.</p>
-          </div>
-        );
       case 'RESULTS':
         return analysisResult && (
           <ConversationSummary
@@ -378,10 +340,14 @@ function VerbalInterviewPage() {
         return (
             <Card className="w-full max-w-lg text-center animate-fadeIn shadow-lg">
                 <CardContent className="p-8">
-                    <PartyPopper className="h-16 w-16 text-primary mx-auto mb-4" />
-                    <h2 className="text-2xl font-headline text-primary mb-2">Assessment Complete!</h2>
+                    <div className="h-16 w-16 text-green-500 mx-auto mb-4">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <h2 className="text-2xl font-headline text-primary mb-2">Thank you for your submission!</h2>
                     <p className="text-muted-foreground mb-6">
-                        Thank you for completing the assessment. Your responses have been submitted for review.
+                        The hiring team will get back to you with the next steps.
                     </p>
                     <Button onClick={() => router.push('/')}>
                         Back to Dashboard
@@ -403,26 +369,35 @@ function VerbalInterviewPage() {
             <Loader2 className="h-16 w-16 animate-spin text-primary mb-4" />
             <h2 className="text-2xl font-headline text-primary">Checking access...</h2>
           </div>
-        ) : !canTakeTest ? (
-          <Card className="w-full max-w-lg text-center shadow-lg border-red-200">
-            <CardContent className="p-8">
-              <div className="h-16 w-16 text-red-500 mx-auto mb-4">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                </svg>
-              </div>
-              <h2 className="text-2xl font-headline text-red-600 mb-2">Access Restricted</h2>
-              <p className="text-muted-foreground mb-6">
-                You have reached the maximum number of attempts ({MAX_ATTEMPTS}) for this test. 
-                Please contact your administrator if you need additional attempts.
-              </p>
-              <Button onClick={() => router.push('/')} variant="outline">
-                Back to Dashboard
-              </Button>
-            </CardContent>
-          </Card>
         ) : (
-          renderContent()
+          <div className={!canTakeTest ? "relative" : ""}>
+            {/* Greyed out overlay when attempts exceeded */}
+            {!canTakeTest && (
+              <div className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm z-50 flex items-center justify-center">
+                <Card className="w-full max-w-lg text-center shadow-lg border-red-200 bg-white">
+                  <CardContent className="p-8">
+                    <div className="h-16 w-16 text-red-500 mx-auto mb-4">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                      </svg>
+                    </div>
+                    <h2 className="text-2xl font-headline text-red-600 mb-2">Access Restricted</h2>
+                    <p className="text-muted-foreground mb-6">
+                      You have reached the maximum number of attempts ({MAX_ATTEMPTS}) for this test. 
+                      Please contact your administrator if you need additional attempts.
+                    </p>
+                    <Button onClick={() => router.push('/')} variant="outline">
+                      Back to Dashboard
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+            {/* Main content - always rendered but disabled when attempts exceeded */}
+            <div className={!canTakeTest ? "opacity-30 pointer-events-none" : ""}>
+              {renderContent()}
+            </div>
+          </div>
         )}
       </main>
     </div>

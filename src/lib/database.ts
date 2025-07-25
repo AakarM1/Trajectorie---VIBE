@@ -34,8 +34,8 @@ export interface FirestoreUser {
   clientName: string;
   role: string;
   passwordHash?: string; // In real app, store hashed passwords
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
 }
 
 // Configuration interface for Firestore
@@ -43,15 +43,15 @@ export interface FirestoreConfig {
   id: string;
   type: 'jdt' | 'sjt' | 'global';
   data: any;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
 }
 
 // Firestore Submission interface
 export interface FirestoreSubmission extends Omit<Submission, 'date'> {
-  date: Timestamp;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  date: Timestamp | null;
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
 }
 
 // User operations
@@ -249,6 +249,27 @@ export const submissionService = {
     return obj;
   },
 
+  // Update submission
+  async update(submissionId: string, updates: Partial<Submission & { analysisCompleted?: boolean; analysisCompletedAt?: Date }>): Promise<boolean> {
+    try {
+      console.log('📝 Updating submission in Firestore:', submissionId);
+      
+      // Clean the update data to remove undefined values
+      const cleanedUpdates = this.removeUndefinedFields(updates);
+      
+      await updateDoc(doc(db, COLLECTIONS.SUBMISSIONS, submissionId), {
+        ...cleanedUpdates,
+        updatedAt: serverTimestamp()
+      });
+      
+      console.log('✅ Submission updated successfully:', submissionId);
+      return true;
+    } catch (error) {
+      console.error('❌ Error updating submission:', error);
+      return false;
+    }
+  },
+
   // Delete submission
   async delete(submissionId: string): Promise<boolean> {
     try {
@@ -311,7 +332,10 @@ export const configService = {
 };
 
 // Utility function to convert Firestore timestamp to JS Date
-export const timestampToDate = (timestamp: Timestamp): Date => {
+export const timestampToDate = (timestamp: Timestamp | null): Date => {
+  if (!timestamp) {
+    return new Date(); // Return current date if timestamp is null
+  }
   return timestamp.toDate();
 };
 
