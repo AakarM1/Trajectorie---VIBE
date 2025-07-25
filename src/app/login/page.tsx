@@ -29,8 +29,8 @@ export default function LoginPage() {
       console.log('👤 User context updated after login:', user);
       console.log('🔑 User role:', user.role);
       
-      if (user.role === 'admin' || user.role === 'Administrator') {
-        console.log('🔑 Admin user detected, redirecting to admin dashboard');
+      if (user.role === 'admin' || user.role === 'Administrator' || user.role === 'superadmin') {
+        console.log('🔑 Admin/SuperAdmin user detected, redirecting to admin dashboard');
         router.push('/admin');
       } else {
         console.log('👤 Regular user detected, redirecting to user dashboard');

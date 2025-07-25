@@ -67,8 +67,8 @@ const AssessmentCard = ({
   hasReport?: boolean;
   onViewReport?: () => void;
 }) => (
-    <div className={`border border-gray-200 flex flex-col rounded-xl overflow-hidden shadow-lg hover:shadow-2xl transition-shadow duration-300 ${isDisabled ? 'opacity-50 bg-gray-50' : ''}`}>
-        <div className="p-4 flex-grow">
+    <div className="border border-gray-200 flex flex-col rounded-xl overflow-hidden shadow-lg hover:shadow-2xl transition-shadow duration-300">
+        <div className={`p-4 flex-grow ${isDisabled ? 'opacity-50 bg-gray-50' : ''}`}>
             <h3 className="text-red-600 font-bold border-b-2 border-red-200 pb-1 mb-3 text-2xl flex items-center gap-2">{icon} {title}</h3>
             <div className="text-lg space-y-3 text-gray-700">
                 <p><span className="font-bold">Decide:</span> {decide}</p>
@@ -76,7 +76,7 @@ const AssessmentCard = ({
                 <p><span className="font-bold">Remember:</span> {remember}</p>
             </div>
         </div>
-        <div className="bg-gray-100 p-4 border-t border-b border-gray-200">
+        <div className={`bg-gray-100 p-4 border-t border-b border-gray-200 ${isDisabled ? 'opacity-50' : ''}`}>
             <div className="grid grid-cols-2 gap-4 text-center">
                 <div>
                     <p className="text-base text-gray-500">No. of questions</p>
@@ -90,7 +90,7 @@ const AssessmentCard = ({
                 </div>
             </div>
         </div>
-        <div className="bg-green-800 text-white p-2 text-sm">
+        <div className={`bg-green-800 text-white p-2 text-sm ${isDisabled ? 'opacity-50' : ''}`}>
             <div className="flex justify-between items-center px-2">
                 <span className="flex items-center gap-2"><Headphones className="h-4 w-4" /> Headphones needed</span>
                 <span>Yes</span>
@@ -109,7 +109,7 @@ const AssessmentCard = ({
             {hasReport && (
               <button 
                 onClick={onViewReport}
-                className="w-full bg-blue-600 text-white font-bold py-3 flex items-center justify-center hover:bg-blue-700 transition-colors border-t border-gray-300"
+                className="w-full bg-blue-500 text-white font-bold py-3 flex items-center justify-center hover:bg-blue-600 transition-all duration-200 border-t border-gray-300 shadow-md hover:shadow-lg"
               >
                 <Eye className="mr-2 h-5 w-5" />
                 View Report
@@ -126,7 +126,7 @@ const AssessmentCard = ({
             {hasReport && (
               <button 
                 onClick={onViewReport}
-                className="w-full bg-blue-600 text-white font-bold py-3 flex items-center justify-center hover:bg-blue-700 transition-colors border-t border-gray-300"
+                className="w-full bg-blue-500 text-white font-bold py-3 flex items-center justify-center hover:bg-blue-600 transition-all duration-200 border-t border-gray-300 shadow-md hover:shadow-lg"
               >
                 <Eye className="mr-2 h-5 w-5" />
                 View Report
@@ -150,6 +150,8 @@ function SelectionPage() {
   const [jdtAttempts, setJdtAttempts] = useState(0);
   const [hasJdtReport, setHasJdtReport] = useState(false);
   const [hasSjtReport, setHasSjtReport] = useState(false);
+  const [sjtQuestionCount, setSjtQuestionCount] = useState(5);
+  const [jdtQuestionCount, setJdtQuestionCount] = useState(5);
   
   const MAX_ATTEMPTS = 1; // Maximum attempts per test
 
@@ -169,6 +171,16 @@ function SelectionPage() {
         
         setIsJdtConfigured(!!jdtConfig);
         setIsSjtConfigured(!!sjtConfig);
+        
+        // Load question counts from configurations
+        if (sjtConfig?.settings?.numberOfQuestions) {
+          setSjtQuestionCount(sjtConfig.settings.numberOfQuestions);
+        }
+        if (jdtConfig?.settings?.numberOfQuestions) {
+          const manualQuestions = jdtConfig.settings.numberOfQuestions || 0;
+          const aiQuestions = jdtConfig.settings.aiGeneratedQuestions || 0;
+          setJdtQuestionCount(manualQuestions + aiQuestions);
+        }
         
         // Load attempt counts
         const sjtAttemptsCount = await getUserAttempts('SJT');
@@ -239,7 +251,7 @@ function SelectionPage() {
                                 decide="Read each situation. Decide what you would do in that situation."
                                 howItWorks="Each question is 1 situation with response choices. There is no right or wrong response, so choose a response based on what you would really do and not what sounds ideal."
                                 remember="Finish all questions in 1 attempt. If get logged out you will need to reattempt all questions again."
-                                questions="05"
+                                questions={sjtQuestionCount.toString().padStart(2, '0')}
                                 attempts={`${sjtAttempts}/${MAX_ATTEMPTS}`}
                                 link="/sjt"
                                 isDisabled={sjtAttempts >= MAX_ATTEMPTS}
@@ -256,7 +268,7 @@ function SelectionPage() {
                                 decide="Analyze the job description and respond to tailored questions."
                                 howItWorks="Start by understanding the role requirements. Then respond to questions designed to assess your fit and skills for that role."
                                 remember="Once you finish the analysis and start responding to questions, you need to finish all questions in 1 attempt."
-                                questions="05"
+                                questions={jdtQuestionCount.toString().padStart(2, '0')}
                                 attempts={`${jdtAttempts}/${MAX_ATTEMPTS}`}
                                 link="/interview"
                                 isDisabled={jdtAttempts >= MAX_ATTEMPTS}

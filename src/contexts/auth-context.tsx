@@ -44,11 +44,15 @@ interface AuthContextType {
   getLatestUserSubmission: (testType: 'JDT' | 'SJT') => Promise<Submission | null>;
   // Real-time listeners
   onSubmissionsChange: (callback: (submissions: Submission[]) => void) => () => void;
+  // Role checking helpers
+  isSuperAdmin: () => boolean;
+  isAdmin: () => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const ADMIN_EMAIL = 'admin@gmail.com';
+const SUPERADMIN_EMAIL = 'superadmin@gmail.com';
 
 // Convert Firestore user to regular user
 const convertFirestoreUser = (fsUser: FirestoreUser): User => {
@@ -84,71 +88,96 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const seedDefaultUsers = async () => {
     try {
-      console.log('🌱 Seeding users in Firestore...');
+      console.log('🌱 Checking user seeding requirements...');
       console.log('📡 Testing Firestore connection...');
       
       // Test basic Firestore connection first
+      let existingUsers: any[] = [];
       try {
-        const testUsers = await userService.getAll();
-        console.log('✅ Firestore connection successful. Found', testUsers.length, 'existing users');
+        existingUsers = await userService.getAll();
+        console.log('✅ Firestore connection successful. Found', existingUsers.length, 'existing users');
       } catch (connectionError) {
         console.error('❌ Firestore connection failed:', connectionError);
         return;
       }
       
-      // Check if admin user exists
-      const existingAdmin = await userService.getByEmail(ADMIN_EMAIL);
-      if (existingAdmin) {
-        console.log('✅ Admin user already exists in Firestore');
-        return;
-      }
-
-      console.log('👤 Creating admin user...');
-      // Seed admin user
-      const adminId = await userService.create({
-        email: ADMIN_EMAIL,
-        candidateName: 'Admin User',
-        candidateId: 'ADMIN001',
-        clientName: 'System',
-        role: 'admin',
-        passwordHash: 'admin123'
-      });
-
-      if (adminId) {
-        console.log('✅ Admin user created in Firestore with ID:', adminId);
-      }
-
-      // Seed 10 test users
-      const testUsers = [
-        { email: 'candidate1@test.com', name: 'Alice Johnson', id: 'C001', client: 'TechCorp' },
-        { email: 'candidate2@test.com', name: 'Bob Smith', id: 'C002', client: 'InnovateCo' },
-        { email: 'candidate3@test.com', name: 'Carol Davis', id: 'C003', client: 'StartupXYZ' },
-        { email: 'candidate4@test.com', name: 'David Wilson', id: 'C004', client: 'MegaCorp' },
-        { email: 'candidate5@test.com', name: 'Eve Brown', id: 'C005', client: 'SmallBiz' },
-        { email: 'candidate6@test.com', name: 'Frank Miller', id: 'C006', client: 'Enterprise Ltd' },
-        { email: 'candidate7@test.com', name: 'Grace Lee', id: 'C007', client: 'Innovation Hub' },
-        { email: 'candidate8@test.com', name: 'Henry Taylor', id: 'C008', client: 'Future Tech' },
-        { email: 'candidate9@test.com', name: 'Iris Chen', id: 'C009', client: 'Global Solutions' },
-        { email: 'candidate10@test.com', name: 'Jack Anderson', id: 'C010', client: 'Digital Dynamics' }
-      ];
-
-      console.log('👥 Creating test users...');
-      for (const testUser of testUsers) {
-        const existing = await userService.getByEmail(testUser.email);
-        if (!existing) {
-          const userId = await userService.create({
-            email: testUser.email,
-            candidateName: testUser.name,
-            candidateId: testUser.id,
-            clientName: testUser.client,
-            role: 'candidate',
-            passwordHash: 'password123'
-          });
-          console.log('👤 Created user:', testUser.email, 'with ID:', userId);
+      // Always check and create superadmin user if it doesn't exist
+      console.log('👑 Checking for superadmin user...');
+      const existingSuperAdmin = await userService.getByEmail(SUPERADMIN_EMAIL);
+      if (!existingSuperAdmin) {
+        console.log('👑 Creating superadmin user...');
+        const superAdminId = await userService.create({
+          email: SUPERADMIN_EMAIL,
+          candidateName: 'Super Administrator',
+          candidateId: 'SUPERADMIN001',
+          clientName: 'System',
+          role: 'superadmin',
+          passwordHash: 'superadmin123'
+        });
+        if (superAdminId) {
+          console.log('✅ Superadmin user created in Firestore with ID:', superAdminId);
         }
+      } else {
+        console.log('✅ Superadmin user already exists in Firestore');
       }
+      
+      // Always check and create admin user if it doesn't exist
+      console.log('👤 Checking for admin user...');
+      const existingAdmin = await userService.getByEmail(ADMIN_EMAIL);
+      if (!existingAdmin) {
+        console.log('👤 Creating admin user...');
+        const adminId = await userService.create({
+          email: ADMIN_EMAIL,
+          candidateName: 'Admin User',
+          candidateId: 'ADMIN001',
+          clientName: 'System',
+          role: 'admin',
+          passwordHash: 'admin123'
+        });
+        if (adminId) {
+          console.log('✅ Admin user created in Firestore with ID:', adminId);
+        }
+      } else {
+        console.log('✅ Admin user already exists in Firestore');
+      }
+      
+      // Only seed test users if no users existed initially
+      if (existingUsers.length === 0) {
+        console.log('🌱 No users found initially, creating test users...');
+        
+        // Seed 10 test users
+        const testUsers = [
+          { email: 'candidate1@test.com', name: 'Alice Johnson', id: 'C001', client: 'TechCorp' },
+          { email: 'candidate2@test.com', name: 'Bob Smith', id: 'C002', client: 'InnovateCo' },
+          { email: 'candidate3@test.com', name: 'Carol Davis', id: 'C003', client: 'StartupXYZ' },
+          { email: 'candidate4@test.com', name: 'David Wilson', id: 'C004', client: 'MegaCorp' },
+          { email: 'candidate5@test.com', name: 'Eve Brown', id: 'C005', client: 'SmallBiz' },
+          { email: 'candidate6@test.com', name: 'Frank Miller', id: 'C006', client: 'Enterprise Ltd' },
+          { email: 'candidate7@test.com', name: 'Grace Lee', id: 'C007', client: 'Innovation Hub' },
+          { email: 'candidate8@test.com', name: 'Henry Taylor', id: 'C008', client: 'Future Tech' },
+          { email: 'candidate9@test.com', name: 'Iris Chen', id: 'C009', client: 'Global Solutions' },
+          { email: 'candidate10@test.com', name: 'Jack Anderson', id: 'C010', client: 'Digital Dynamics' }
+        ];
 
-      console.log('✅ Seeded Firestore with 1 admin and 10 test users');
+        console.log('👥 Creating test users...');
+        for (const testUser of testUsers) {
+          const existing = await userService.getByEmail(testUser.email);
+          if (!existing) {
+            const userId = await userService.create({
+              email: testUser.email,
+              candidateName: testUser.name,
+              candidateId: testUser.id,
+              clientName: testUser.client,
+              role: 'candidate',
+              passwordHash: 'password123'
+            });
+            console.log('👤 Created user:', testUser.email, 'with ID:', userId);
+          }
+        }
+        console.log('✅ Seeded Firestore with 1 superadmin, 1 admin and 10 test users');
+      } else {
+        console.log('✅ Test users already exist, skipping test user creation');
+      }
     } catch (error) {
       console.error('❌ Error seeding users in Firestore:', error);
     }
@@ -462,6 +491,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  // Helper function to check if current user is superadmin
+  const isSuperAdmin = (): boolean => {
+    return user?.role === 'superadmin';
+  };
+
+  // Helper function to check if current user is admin or superadmin
+  const isAdmin = (): boolean => {
+    return user?.role === 'admin' || user?.role === 'Administrator' || user?.role === 'superadmin';
+  };
+
   const value: AuthContextType = {
     user,
     login,
@@ -479,7 +518,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     getUserAttempts,
     canUserTakeTest,
     getLatestUserSubmission,
-    onSubmissionsChange
+    onSubmissionsChange,
+    isSuperAdmin,
+    isAdmin
   };
 
   return (
@@ -500,9 +541,10 @@ export const useAuth = () => {
 interface ProtectedRouteProps {
   children: ReactNode;
   adminOnly?: boolean;
+  superAdminOnly?: boolean;
 }
 
-export const ProtectedRoute = ({ children, adminOnly = false }: ProtectedRouteProps) => {
+export const ProtectedRoute = ({ children, adminOnly = false, superAdminOnly = false }: ProtectedRouteProps) => {
   const { user, loading } = useAuth();
   const router = useRouter();
 
@@ -512,6 +554,7 @@ export const ProtectedRoute = ({ children, adminOnly = false }: ProtectedRoutePr
       console.log('👤 Current user:', user);
       console.log('🔑 User role:', user?.role);
       console.log('🚪 Admin only required:', adminOnly);
+      console.log('👑 SuperAdmin only required:', superAdminOnly);
       
       if (!user) {
         console.log('🚫 User not authenticated, redirecting to login');
@@ -519,9 +562,16 @@ export const ProtectedRoute = ({ children, adminOnly = false }: ProtectedRoutePr
         return;
       }
 
-      if (adminOnly && user.role !== 'admin' && user.role !== 'Administrator') {
+      if (superAdminOnly && user.role !== 'superadmin') {
+        console.log('🚫 User not superadmin (role:', user.role, '), redirecting to home');
+        console.log('🚫 Required role: superadmin, actual role:', user.role);
+        router.push('/');
+        return;
+      }
+
+      if (adminOnly && user.role !== 'admin' && user.role !== 'Administrator' && user.role !== 'superadmin') {
         console.log('🚫 User not admin (role:', user.role, '), redirecting to home');
-        console.log('🚫 Required role: admin or Administrator, actual role:', user.role);
+        console.log('🚫 Required role: admin, Administrator, or superadmin, actual role:', user.role);
         router.push('/');
         return;
       }
@@ -541,7 +591,9 @@ export const ProtectedRoute = ({ children, adminOnly = false }: ProtectedRoutePr
     );
   }
 
-  if (!user || (adminOnly && user.role !== 'admin' && user.role !== 'Administrator')) {
+  if (!user || 
+      (superAdminOnly && user.role !== 'superadmin') ||
+      (adminOnly && user.role !== 'admin' && user.role !== 'Administrator' && user.role !== 'superadmin')) {
     return null;
   }
 

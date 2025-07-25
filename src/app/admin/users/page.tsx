@@ -7,6 +7,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Users, UserPlus, Trash2, ArrowLeft, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -34,7 +35,7 @@ interface User {
 }
 
 const UserManagementPage = () => {
-    const { getUsers, register, deleteUser } = useAuth();
+    const { getUsers, register, deleteUser, isSuperAdmin, isAdmin } = useAuth();
     const { toast } = useToast();
 
     const [users, setUsers] = useState<User[]>([]);
@@ -46,6 +47,7 @@ const UserManagementPage = () => {
     const [candidateId, setCandidateId] = useState('');
     const [clientName, setClientName] = useState('');
     const [role, setRole] = useState('');
+    const [userType, setUserType] = useState<'candidate' | 'admin' | 'superadmin'>('candidate');
 
     const fetchUsers = async () => {
         try {
@@ -73,6 +75,7 @@ const UserManagementPage = () => {
         setCandidateId('');
         setClientName('');
         setRole('');
+        setUserType('candidate');
     };
 
     const handleAddUser = async (e: React.FormEvent) => {
@@ -86,7 +89,7 @@ const UserManagementPage = () => {
                 candidateName,
                 candidateId,
                 clientName,
-                role,
+                role: userType === 'candidate' ? role : userType,
             });
 
             if (success) {
@@ -157,7 +160,7 @@ const UserManagementPage = () => {
                         <Card className="bg-card/60 backdrop-blur-xl">
                             <CardHeader>
                                 <CardTitle className="flex items-center gap-2"><UserPlus /> Add New User</CardTitle>
-                                <CardDescription>Create a new candidate or admin account.</CardDescription>
+                                <CardDescription>Create a new candidate, admin, or superadmin account.</CardDescription>
                             </CardHeader>
                             <form onSubmit={handleAddUser}>
                                 <CardContent className="space-y-4">
@@ -182,9 +185,26 @@ const UserManagementPage = () => {
                                         <Input id="clientName" placeholder="e.g., TechCorp" required value={clientName} onChange={e => setClientName(e.target.value)} />
                                     </div>
                                     <div className="space-y-2">
-                                        <Label htmlFor="role">Test Name / Role</Label>
-                                        <Input id="role" placeholder="e.g., Software Engineer" required value={role} onChange={e => setRole(e.target.value)} />
+                                        <Label htmlFor="userType">User Type</Label>
+                                        <Select value={userType} onValueChange={(value: 'candidate' | 'admin' | 'superadmin') => setUserType(value)}>
+                                          <SelectTrigger>
+                                            <SelectValue placeholder="Select user type" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="candidate">Candidate</SelectItem>
+                                            <SelectItem value="admin">Administrator</SelectItem>
+                                            {isSuperAdmin() && (
+                                              <SelectItem value="superadmin">Super Administrator</SelectItem>
+                                            )}
+                                          </SelectContent>
+                                        </Select>
                                     </div>
+                                    {userType === 'candidate' && (
+                                      <div className="space-y-2">
+                                          <Label htmlFor="role">Test Name / Role</Label>
+                                          <Input id="role" placeholder="e.g., Software Engineer" required value={role} onChange={e => setRole(e.target.value)} />
+                                      </div>
+                                    )}
                                 </CardContent>
                                 <CardFooter>
                                     <Button type="submit" className="w-full" disabled={isLoading}>
@@ -218,9 +238,23 @@ const UserManagementPage = () => {
                                                 <TableRow key={user.id}>
                                                     <TableCell className="font-medium">{user.candidateName}</TableCell>
                                                     <TableCell>{user.email}</TableCell>
-                                                    <TableCell>{user.role}</TableCell>
+                                                    <TableCell>
+                                                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                                        user.role === 'superadmin' ? 'bg-purple-100 text-purple-800' :
+                                                        user.role === 'admin' || user.role === 'Administrator' ? 'bg-blue-100 text-blue-800' :
+                                                        'bg-gray-100 text-gray-800'
+                                                      }`}>
+                                                        {user.role === 'superadmin' ? '👑 Super Admin' :
+                                                         user.role === 'admin' || user.role === 'Administrator' ? '🔑 Admin' :
+                                                         user.role}
+                                                      </span>
+                                                    </TableCell>
                                                     <TableCell className="text-right">
-                                                        {user.email !== 'admin@gmail.com' && (
+                                                        {/* Superadmin can delete anyone except themselves, regular admin can delete non-admin users */}
+                                                        {(
+                                                          (isSuperAdmin() && user.email !== 'superadmin@gmail.com') ||
+                                                          (isAdmin() && !isSuperAdmin() && user.role !== 'admin' && user.role !== 'Administrator' && user.role !== 'superadmin' && user.email !== 'admin@gmail.com')
+                                                        ) && (
                                                             <AlertDialog>
                                                               <AlertDialogTrigger asChild>
                                                                  <Button variant="ghost" size="icon">
