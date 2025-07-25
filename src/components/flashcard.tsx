@@ -5,6 +5,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Loader2, Send, Type, CheckCircle, RefreshCcw, Info, ArrowLeft, ArrowRight, Video, Mic, Square, X } from 'lucide-react';
 import MediaCapture from './audio-recorder';
+import RealTimeMediaCapture from './real-time-audio-recorder';
 import { transcribeAudio, type TranscribeAudioInput } from '@/ai/flows/transcribe-audio';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -64,8 +65,11 @@ const Flashcard: React.FC<FlashcardProps> = ({
   const [mediaData, setMediaData] = useState<{ blob: Blob; dataUri: string } | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [editableTranscription, setEditableTranscription] = useState('');
+  const [realtimeTranscription, setRealtimeTranscription] = useState('');
   const [textAnswer, setTextAnswer] = useState('');
   const [showInstructions, setShowInstructions] = useState(false);
+  const [questionTranscriptions, setQuestionTranscriptions] = useState<{[key: number]: string}>({});
+  const [questionMediaData, setQuestionMediaData] = useState<{[key: number]: { blob: Blob; dataUri: string }}>({});
   const { toast } = useToast();
   
   const [testTimeElapsed, setTestTimeElapsed] = useState(0); // Track elapsed time in seconds
@@ -176,10 +180,72 @@ const Flashcard: React.FC<FlashcardProps> = ({
     }
   }, [currentQuestionIndex, isAnswered, conversationHistory]);
 
+  // Create refs to track previous question index
+  const prevQuestionIndexRef = useRef<number>(-1);
+
+  // Load saved transcriptions and media data when changing questions
+  useEffect(() => {
+    const prevIndex = prevQuestionIndexRef.current;
+    
+    // Save current transcription for the previous question if we have one
+    if (prevIndex >= 0 && prevIndex !== currentQuestionIndex) {
+      if (editableTranscription.trim()) {
+        setQuestionTranscriptions(prev => ({
+          ...prev,
+          [prevIndex]: editableTranscription
+        }));
+      }
+      
+      if (mediaData) {
+        setQuestionMediaData(prev => ({
+          ...prev,
+          [prevIndex]: mediaData
+        }));
+      }
+    }
+
+    // Load saved transcription for the new question
+    const savedTranscription = questionTranscriptions[currentQuestionIndex] || '';
+    const savedMedia = questionMediaData[currentQuestionIndex] || null;
+    
+    if (prevIndex !== currentQuestionIndex) {
+      setEditableTranscription(savedTranscription);
+      setMediaData(savedMedia);
+      setRealtimeTranscription('');
+      setIsRecording(false);
+      setIsTranscribing(false);
+    }
+
+    // Update the ref for next time
+    prevQuestionIndexRef.current = currentQuestionIndex;
+  }, [currentQuestionIndex, questionTranscriptions, questionMediaData, editableTranscription, mediaData]);
+
 
   const handleRecordingComplete = (blob: Blob, dataUri: string) => {
     setMediaData({ blob, dataUri });
-    handleTranscribe(dataUri);
+    
+    // If we have real-time transcription, use it directly and don't trigger additional transcription
+    if (realtimeTranscription.trim()) {
+      setEditableTranscription(realtimeTranscription);
+      // Save to question-specific storage immediately
+      setQuestionTranscriptions(prev => ({
+        ...prev,
+        [currentQuestionIndex]: realtimeTranscription
+      }));
+      setQuestionMediaData(prev => ({
+        ...prev,
+        [currentQuestionIndex]: { blob, dataUri }
+      }));
+    } else {
+      // Only fall back to traditional transcription if real-time didn't work
+      handleTranscribe(dataUri);
+    }
+  };
+
+  const handleRealtimeTranscription = (transcription: string) => {
+    setRealtimeTranscription(transcription);
+    // Also update the editable transcription in real-time so it persists
+    setEditableTranscription(transcription);
   };
 
   const handleTranscribe = async (dataUri: string) => {
@@ -229,7 +295,9 @@ const Flashcard: React.FC<FlashcardProps> = ({
         });
       }
     } else {
-      if (editableTranscription.trim() && mediaData) {
+      // For audio/video modes, use the final transcription (edited takes precedence over real-time)
+      const finalTranscription = editableTranscription || realtimeTranscription;
+      if (finalTranscription.trim() && mediaData) {
         // Stop the question timer when submitting and save the time
         if (questionTimerRef.current) {
           clearInterval(questionTimerRef.current);
@@ -239,12 +307,12 @@ const Flashcard: React.FC<FlashcardProps> = ({
         const currentTimes = [...questionTimesRef.current];
         currentTimes[currentQuestionIndex] = currentQuestionTime;
         setQuestionTimes(currentTimes);
-        onAnswerSubmit(editableTranscription, mediaData.dataUri);
+        onAnswerSubmit(finalTranscription, mediaData.dataUri);
       } else {
         toast({
           variant: "destructive",
           title: "Submission Error",
-          description: "A transcribed answer is required. Please record, transcribe, and review first.",
+          description: "A transcribed answer is required. Please record and ensure transcription is complete.",
         });
       }
     }
@@ -253,8 +321,22 @@ const Flashcard: React.FC<FlashcardProps> = ({
   const handleRerecord = () => {
     setMediaData(null);
     setEditableTranscription('');
+    setRealtimeTranscription('');
     setIsRecording(false);
     setIsTranscribing(false);
+    
+    // Clear saved data for current question
+    setQuestionTranscriptions(prev => {
+      const updated = { ...prev };
+      delete updated[currentQuestionIndex];
+      return updated;
+    });
+    setQuestionMediaData(prev => {
+      const updated = { ...prev };
+      delete updated[currentQuestionIndex];
+      return updated;
+    });
+    
     toast({
         title: "Ready to Record",
         description: "You can now record your answer again.",
@@ -262,11 +344,13 @@ const Flashcard: React.FC<FlashcardProps> = ({
   }
 
   const isSubmitDisabled = () => {
-    if (isProcessing || isAnswered) return true;
+    if (isProcessing || isAnswered || isRecording) return true;
     if (mode === 'text') {
       return !textAnswer.trim();
     }
-    return !editableTranscription.trim() || isTranscribing || isRecording;
+    // For audio/video modes, check if we have transcription (either real-time or edited)
+    const finalTranscription = editableTranscription || realtimeTranscription;
+    return !finalTranscription.trim() || isTranscribing;
   }
   
   const captureMode = mode;
@@ -365,8 +449,9 @@ const Flashcard: React.FC<FlashcardProps> = ({
             ) : (
                  <div className="grid md:grid-cols-2 gap-6 items-start">
                     <div className='w-full'>
-                        <MediaCapture
+                        <RealTimeMediaCapture
                             onRecordingComplete={handleRecordingComplete}
+                            onRealtimeTranscription={handleRealtimeTranscription}
                             isRecordingExternally={isRecording}
                             onStartRecording={() => setIsRecording(true)}
                             onStopRecording={() => setIsRecording(false)}
@@ -383,23 +468,51 @@ const Flashcard: React.FC<FlashcardProps> = ({
                         ) : (
                             <>
                                 <Label htmlFor="transcription" className="flex items-center gap-2 text-gray-600 font-medium">
-                                    Review and edit your transcribed answer:
+                                    {isRecording ? "Live transcription:" : (mediaData ? "Final transcription (read-only):" : "Your transcribed answer will appear here:")}
                                 </Label>
                                 <Textarea
                                     id="transcription"
-                                    placeholder={!mediaData ? "Your transcribed answer will appear here after recording." : "Transcription in progress..."}
-                                    value={editableTranscription}
-                                    onChange={(e) => setEditableTranscription(e.target.value)}
+                                    placeholder={
+                                        isRecording 
+                                            ? "Speak clearly to see your words appear here in real-time..." 
+                                            : (!mediaData ? "Your transcribed answer will appear here after recording." : "Transcription complete - cannot be edited.")
+                                    }
+                                    value={isRecording ? realtimeTranscription : editableTranscription}
+                                    onChange={() => {
+                                        // Transcription is never editable for audio/video modes
+                                        // This ensures users cannot modify the transcribed text
+                                    }}
                                     rows={8}
-                                    className="bg-gray-50 flex-grow"
-                                    disabled={!mediaData || isAnswered}
+                                    className={`flex-grow ${
+                                        isRecording || !!mediaData || isAnswered 
+                                            ? 'bg-gray-100 border-gray-300 cursor-not-allowed text-gray-600' 
+                                            : 'bg-gray-50'
+                                    }`}
+                                    disabled={isRecording || !!mediaData || isAnswered}
+                                    readOnly={true}
                                 />
-                                {mediaData && !isAnswered && (
-                                    <div className="flex gap-4">
-                                        <Button onClick={handleRerecord} variant="outline" size="sm">
-                                            <RefreshCcw className="mr-2 h-4 w-4" />
-                                            Re-record
-                                        </Button>
+                                {isRecording && (
+                                    <div className="text-sm text-blue-600 bg-blue-50 p-2 rounded-md border border-blue-200">
+                                        <span className="flex items-center">
+                                            <span className="animate-pulse text-red-500 mr-2">●</span>
+                                            Recording in progress - speak clearly for accurate transcription
+                                        </span>
+                                    </div>
+                                )}
+                                {mediaData && !isAnswered && !isRecording && (
+                                    <div className="flex flex-col gap-2">
+                                        <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded-md border border-gray-200">
+                                            <span className="flex items-center">
+                                                <span className="text-green-500 mr-2">✓</span>
+                                                Recording complete - transcription is final and cannot be edited
+                                            </span>
+                                        </div>
+                                        <div className="flex gap-4">
+                                            <Button onClick={handleRerecord} variant="outline" size="sm">
+                                                <RefreshCcw className="mr-2 h-4 w-4" />
+                                                Re-record
+                                            </Button>
+                                        </div>
                                     </div>
                                 )}
                            </>

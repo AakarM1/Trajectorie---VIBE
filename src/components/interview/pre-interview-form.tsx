@@ -133,7 +133,7 @@ export function PreInterviewForm({ onFormSubmit, defaultName = '', defaultRole =
                         
                         <div className="pl-8 space-y-3">
                             <InstructionItem>Ensure your camera and microphone are enabled and working.</InstructionItem>
-                            <InstructionItem>"Record" your answer, then "Stop" when finished. Your answer will be transcribed automatically.</InstructionItem>
+                            <InstructionItem>"Record" your answer, then "Stop" when finished. Your speech will be transcribed in real-time as you speak.</InstructionItem>
                             <InstructionItem>Review your transcribed answer and then "Submit" to save it.</InstructionItem>
                             <InstructionItem>You can navigate between questions before finishing the test.</InstructionItem>
                             <InstructionItem>Keep it real life, stay spontaneous. <span className="font-bold">Do not overthink</span> a response.</InstructionItem>

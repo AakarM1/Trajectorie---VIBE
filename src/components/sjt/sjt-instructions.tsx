@@ -103,7 +103,7 @@ export function SJTInstructions({ onProceed }: SJTInstructionsProps) {
                             <h3 className="font-bold text-lg mb-2">QUESTIONS</h3>
                             <div className="space-y-2 self-start text-left">
                                 <QuestionDetailItem>Situation based questions</QuestionDetailItem>
-                                <QuestionDetailItem>Record video/audio answers</QuestionDetailItem>
+                                <QuestionDetailItem>Record video/audio answers with real-time transcription</QuestionDetailItem>
                                 <QuestionDetailItem>Choose your response</QuestionDetailItem>
                             </div>
                         </div>
@@ -123,6 +123,7 @@ export function SJTInstructions({ onProceed }: SJTInstructionsProps) {
                         <div className="pl-8 space-y-3">
                             <InstructionItem>Answer all questions in one attempt, so start when you are really ready.</InstructionItem>
                             <InstructionItem>"Submit" every response and "Finish Test" when you have responded to all.</InstructionItem>
+                            <InstructionItem>For audio/video responses, your speech will be transcribed in real-time as you speak.</InstructionItem>
                              <InstructionItem>If no option matches your real life response to a question, choose one that is closest.</InstructionItem>
                             <InstructionItem>Keep it real life, stay spontaneous. <span className="font-bold">Do not overthink</span> a response.</InstructionItem>
                         </div>
