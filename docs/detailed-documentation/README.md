@@ -32,6 +32,14 @@ This directory contains comprehensive documentation for the Verbal Insights AI-p
   - Data models and validation schemas
   - Storage strategies and performance optimization
 
+- **[🗄️ Complete Storage Architecture Flowchart](./COMPLETE_STORAGE_ARCHITECTURE_FLOWCHART.md)**
+  - Extremely detailed storage flow diagrams
+  - Environment configuration detection
+  - Media storage strategy (small vs large files)
+  - Real-time data synchronization patterns
+  - Error handling and fallback mechanisms
+  - Admin operations and data retrieval flows
+
 ### 👨‍💻 **Development & Deployment**
 - **[👨‍💻 Developer Setup & Deployment Guide](./DEVELOPER_SETUP_DEPLOYMENT_GUIDE.md)**
   - Complete development environment setup
@@ -58,10 +66,10 @@ This directory contains comprehensive documentation for the Verbal Insights AI-p
 
 ## 📊 Documentation Statistics
 
-- **Total Documents**: 5 comprehensive guides
-- **Total Lines**: 2,100+ lines of documentation
+- **Total Documents**: 6 comprehensive guides
+- **Total Lines**: 2,600+ lines of documentation
 - **Coverage**: Complete system analysis from code to deployment
-- **Diagrams**: Multiple Mermaid architecture diagrams
+- **Diagrams**: Multiple Mermaid architecture diagrams and detailed flowcharts
 - **Code Examples**: Extensive code snippets and configurations
 
 ## 🔧 Technology Coverage
@@ -74,7 +82,9 @@ Each document covers different aspects of the technology stack:
 | **React 18** | Architecture Guide, Implementation Guide |
 | **TypeScript 5** | Repository Analysis, Implementation Guide |
 | **Google Genkit** | AI Flows Documentation |
-| **Firebase Firestore** | Architecture Guide, AI Flows Documentation |
+| **Firebase Firestore** | Architecture Guide, AI Flows Documentation, Storage Flowchart |
+| **Firebase Storage** | Storage Architecture Flowchart |
+| **localStorage** | Storage Architecture Flowchart |
 | **Tailwind CSS** | Implementation Guide |
 | **Vercel Deployment** | Setup & Deployment Guide |
 
@@ -86,6 +96,7 @@ The documentation includes:
 - **Component Relationship Charts**
 - **AI Processing Pipeline Visualizations**
 - **Database Schema Diagrams**
+- **Complete Storage Architecture Flowchart** (Extremely detailed with error handling flows)
 
 ## 🚀 Getting Started
 
@@ -93,7 +104,8 @@ The documentation includes:
 2. **Setting up development?** Go to [Developer Setup Guide](./DEVELOPER_SETUP_DEPLOYMENT_GUIDE.md)
 3. **Understanding the code?** Check [Implementation Guide](./COMPLETE_IMPLEMENTATION_GUIDE.md)
 4. **Working with AI features?** Read [AI Flows Documentation](./AI_FLOWS_DATA_ARCHITECTURE.md)
-5. **Deploying to production?** Follow [Setup & Deployment Guide](./DEVELOPER_SETUP_DEPLOYMENT_GUIDE.md)
+5. **Understanding storage architecture?** Study [Storage Architecture Flowchart](./COMPLETE_STORAGE_ARCHITECTURE_FLOWCHART.md)
+6. **Deploying to production?** Follow [Setup & Deployment Guide](./DEVELOPER_SETUP_DEPLOYMENT_GUIDE.md)
 
 ---
 
