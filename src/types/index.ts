@@ -20,6 +20,11 @@ export interface ConversationEntry {
   preferredAnswer?: string;
   competency?: string;
   _isStorageUrl?: boolean; // Flag to indicate if videoDataUri is a Firebase Storage URL
+  // SJT specific fields
+  situation?: string;
+  bestResponseRationale?: string;
+  worstResponseRationale?: string;
+  assessedCompetency?: string;
 }
 
 export type AppStatus = 'INITIAL' | 'ASKING' | 'ANALYZING' | 'RESULTS' | 'ERROR';

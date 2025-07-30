@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { FileCog, PlusCircle, Trash2, ArrowLeft, Settings, Clock, ListOrdered } from 'lucide-react';
+import { FileCog, PlusCircle, Trash2, ArrowLeft, Settings, Clock, ListOrdered, BrainCircuit } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
 import Header from '@/components/header';
@@ -28,13 +28,14 @@ interface Scenario {
 interface TestSettings {
   timeLimit: number; // in minutes, 0 for no limit
   numberOfQuestions: number;
+  aiGeneratedQuestions: number; // Number of AI-generated follow-up questions
 }
 
 
 const SJTConfigPage = () => {
   const { toast } = useToast();
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
-  const [settings, setSettings] = useState<TestSettings>({ timeLimit: 0, numberOfQuestions: 5 });
+  const [settings, setSettings] = useState<TestSettings>({ timeLimit: 0, numberOfQuestions: 5, aiGeneratedQuestions: 0 });
 
 
   useEffect(() => {
@@ -53,6 +54,7 @@ const SJTConfigPage = () => {
              setSettings({
                 timeLimit: savedSettings.timeLimit || 0,
                 numberOfQuestions: savedSettings.numberOfQuestions || 5,
+                aiGeneratedQuestions: savedSettings.aiGeneratedQuestions || 0,
              });
           }
         } else {
@@ -153,6 +155,17 @@ const SJTConfigPage = () => {
                                 placeholder="e.g., 5"
                             />
                             <p className="text-xs text-muted-foreground">Set to 0 to use all created scenarios.</p>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="ai-questions-number" className="flex items-center gap-2"><BrainCircuit /> AI Follow-Up Questions</Label>
+                            <Input
+                                id="ai-questions-number"
+                                type="number"
+                                value={settings.aiGeneratedQuestions}
+                                onChange={(e) => setSettings(s => ({ ...s, aiGeneratedQuestions: parseInt(e.target.value, 10) || 0 }))}
+                                placeholder="e.g., 2"
+                            />
+                            <p className="text-xs text-muted-foreground">Number of AI-generated follow-up questions per scenario.</p>
                         </div>
                     </CardContent>
                 </Card>

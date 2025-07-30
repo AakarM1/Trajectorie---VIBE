@@ -64,63 +64,38 @@ export async function POST(request: NextRequest) {
       const submission = convertFirestoreSubmission(fsSubmission);
       
       console.log(`🤖 Analyzing ${submission.history.length} SJT scenarios...`);
-      const sjtAnalyses: any[] = [];
+      const sjtAnalyses: Array<any> = [];
       
-      // Get SJT scenarios with complete data needed for analysis
-      const sjtScenarios = [
-        {
-          situation: "You're working on a group project with a tight deadline, and one team member consistently misses meetings and doesn't contribute their fair share of work.",
-          question: "How would you handle this situation with your team member?",
-          bestResponseRationale: "The best response would involve direct but respectful communication with the team member, offering support while establishing clear expectations, and involving appropriate stakeholders if needed.",
-          worstResponseRationale: "The worst response would be to ignore the situation, publicly shame the team member, or take on all their work without addressing the underlying issue.",
-          assessedCompetency: "Teamwork"
-        },
-        {
-          situation: "Your manager asks you to complete a task that you believe goes against company policy or ethical guidelines.",
-          question: "What would be your approach to handling this request?",
-          bestResponseRationale: "The best response involves respectfully raising concerns with the manager, seeking clarification on policies, and escalating through proper channels if necessary while maintaining professionalism.",
-          worstResponseRationale: "The worst response would be to blindly follow instructions without question, or to refuse outright without proper communication or following appropriate escalation procedures.",
-          assessedCompetency: "Integrity"
-        },
-        {
-          situation: "You receive harsh criticism from a supervisor about your work during a team meeting in front of your colleagues.",
-          question: "How would you respond to this situation?",
-          bestResponseRationale: "The best response involves staying calm, listening actively, asking for specific feedback, and requesting a private follow-up discussion to understand improvement areas.",
-          worstResponseRationale: "The worst response would be to become defensive, argue publicly, shut down emotionally, or dismiss the feedback without consideration.",
-          assessedCompetency: "Resilience"
-        },
-        {
-          situation: "You're assigned a project that requires skills and knowledge you don't currently possess, with a deadline that seems unrealistic.",
-          question: "How would you approach this challenging assignment?",
-          bestResponseRationale: "The best response involves honest assessment of capabilities, creating a learning plan, seeking appropriate resources and mentorship, and communicating realistic timelines with stakeholders.",
-          worstResponseRationale: "The worst response would be to panic, avoid the task, promise unrealistic deliverables, or attempt the work without seeking necessary support and guidance.",
-          assessedCompetency: "Adaptability"
-        }
-      ];
-      
-      // Process each scenario
-      for (let i = 0; i < Math.min(submission.history.length, sjtScenarios.length); i++) {
+      // Process each scenario using admin-defined criteria from the submission
+      for (let i = 0; i < submission.history.length; i++) {
         const entry = submission.history[i];
-        const scenario = sjtScenarios[i];
         
-        if (entry?.answer && scenario) {
-          const sjtAnalysisInput = {
-            situation: scenario.situation,
-            question: scenario.question,
-            bestResponseRationale: scenario.bestResponseRationale,
-            worstResponseRationale: scenario.worstResponseRationale,
-            assessedCompetency: scenario.assessedCompetency,
+        // Skip entries without answers
+        if (!entry?.answer) {
+          console.log(`⚠️ Skipping scenario ${i + 1} - no answer provided`);
+          continue;
+        }
+        
+        // Extract assessedCompetency from the entry - prefer specific admin-defined competency field
+        const assessedCompetency = entry.assessedCompetency || entry.competency || `Situational Judgment ${i+1}`;
+        
+        try {
+          // Create analysis input with all available data from entry
+          const sjtAnalysisInput: AnalyzeSJTResponseInput = {
+            situation: entry.situation || entry.question || "No situation provided",
+            question: entry.question || "No question provided", 
+            bestResponseRationale: entry.bestResponseRationale || "No best response criteria provided",
+            worstResponseRationale: entry.worstResponseRationale || "No worst response criteria provided",
+            assessedCompetency: assessedCompetency,
             candidateAnswer: entry.answer,
           };
           
-          try {
-            const result = await analyzeSJTResponse(sjtAnalysisInput);
-            
-            sjtAnalyses.push({ ...result, competency: scenario.assessedCompetency });
-            console.log(`✅ Analysis complete for scenario ${i + 1}`);
-          } catch (analysisError) {
-            console.warn(`⚠️ Failed to analyze scenario ${i + 1}:`, analysisError);
-          }
+          const result = await analyzeSJTResponse(sjtAnalysisInput);
+          
+          sjtAnalyses.push({ ...result, competency: assessedCompetency });
+          console.log(`✅ Analysis complete for scenario ${i + 1}`);
+        } catch (analysisError) {
+          console.warn(`⚠️ Failed to analyze scenario ${i + 1}:`, analysisError);
         }
       }
       
@@ -166,16 +141,57 @@ export async function POST(request: NextRequest) {
           weaknessesText += "No significant areas of concern identified. The candidate demonstrates consistent professional judgment across all assessed scenarios.";
         }
 
+        // Process analyses to combine scores for the same competency
+        const competencyMap = new Map<string, { totalScore: number, count: number }>();
+        
+        sjtAnalyses.forEach((analysis) => {
+          const competencyName = analysis.competency;
+          if (!competencyMap.has(competencyName)) {
+            competencyMap.set(competencyName, { totalScore: 0, count: 0 });
+          }
+          
+          const record = competencyMap.get(competencyName)!;
+          record.totalScore += analysis.score;
+          record.count += 1;
+        });
+        
+        // Convert map to array of unique competencies with averaged scores
+        const uniqueCompetencies = Array.from(competencyMap.entries()).map(([name, data]) => ({
+          name,
+          score: Math.round((data.totalScore / data.count) * 10) / 10 // Round to 1 decimal place
+        }));
+
+        // Get unique competency names for the summary text
+        const uniqueStrongCompetencies = [...new Set(strongResponses.map(r => r.competency))];
+        const uniqueImprovementCompetencies = [...new Set(improvementAreas.map(r => r.competency))];
+
+        // Update the strength text to use unique competencies
+        if (strongResponses.length > 0 && uniqueStrongCompetencies.length > 0) {
+          // Replace the last part of the strengths text with unique competencies
+          const lastSentenceStart = strengthsText.lastIndexOf("The candidate particularly excels in");
+          if (lastSentenceStart !== -1) {
+            strengthsText = strengthsText.substring(0, lastSentenceStart) + 
+              `The candidate particularly excels in ${uniqueStrongCompetencies.join(', ').replace(/, ([^,]*)$/, ', and $1')}, showing consistent professional judgment in these areas.`;
+          }
+        }
+
+        // Update the weaknesses text to use unique competencies
+        if (improvementAreas.length > 0 && uniqueImprovementCompetencies.length > 0) {
+          // Replace the last part of the weaknesses text with unique competencies
+          const lastSentenceStart = weaknessesText.lastIndexOf("Priority development areas include");
+          if (lastSentenceStart !== -1) {
+            weaknessesText = weaknessesText.substring(0, lastSentenceStart) + 
+              `Priority development areas include ${uniqueImprovementCompetencies.join(', ').replace(/, ([^,]*)$/, ', and $1')}. Focused training in these competencies would significantly enhance professional effectiveness.`;
+          }
+        }
+
         analysisResult = {
           strengths: strengthsText,
           weaknesses: weaknessesText,
-          summary: `The candidate completed ${sjtAnalyses.length} of ${submission.history.length} scenarios with AI analysis. The average competency score was ${(sjtAnalyses.reduce((acc, a) => acc + a.score, 0) / (sjtAnalyses.length || 1)).toFixed(1)}/10. ${strongResponses.length > 0 ? `Strong performance in ${strongResponses.length} scenario(s).` : ''} ${improvementAreas.length > 0 ? `${improvementAreas.length} area(s) identified for development.` : ''}`,
+          summary: `The candidate completed ${sjtAnalyses.length} of ${submission.history.length} scenarios with AI analysis. The average competency score was ${(sjtAnalyses.reduce((acc, a) => acc + a.score, 0) / (sjtAnalyses.length || 1)).toFixed(1)}/10. ${strongResponses.length > 0 ? `Strong performance in ${uniqueStrongCompetencies.length} competency area(s).` : ''} ${improvementAreas.length > 0 ? `${uniqueImprovementCompetencies.length} competency area(s) identified for development.` : ''}`,
           competencyAnalysis: [{
             name: "Situational Competencies",
-            competencies: sjtAnalyses.map((a) => ({
-              name: a.competency,
-              score: a.score
-            })).sort((a,b) => a.name.localeCompare(b.name)),
+            competencies: uniqueCompetencies.sort((a,b) => a.name.localeCompare(b.name)),
           }]
         };
       } else {

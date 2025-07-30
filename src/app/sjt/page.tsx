@@ -5,6 +5,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { ProtectedRoute, useAuth } from '@/contexts/auth-context';
 import type { ConversationEntry, AnalysisResult, PreInterviewDetails, InterviewMode, Submission } from '@/types';
 import type { AnalyzeSJTResponseInput, AnalyzeSJTResponseOutput } from '@/ai/flows/analyze-sjt-response';
+import type { EvaluateAnswerQualityInput, EvaluateAnswerQualityOutput } from '@/ai/flows/evaluate-answer-quality';
 import Flashcard from '@/components/flashcard';
 import ConversationSummary from '@/components/conversation-summary';
 import { Loader2, PartyPopper } from 'lucide-react';
@@ -66,6 +67,8 @@ function SJTInterviewPage() {
   const [questionTimes, setQuestionTimes] = useState<number[]>([]); // Track time per question
   const [canTakeTest, setCanTakeTest] = useState(true);
   const [checkingAttempts, setCheckingAttempts] = useState(true);
+  const [followUpMap, setFollowUpMap] = useState<{[key: number]: number}>({}); // Track follow-up count per question
+  const [maxFollowUps, setMaxFollowUps] = useState(2); // Default max follow-ups per scenario
   
   const MAX_ATTEMPTS = 1;
 
@@ -120,6 +123,31 @@ function SJTInterviewPage() {
             allScenarios.sort(() => 0.5 - Math.random());
           }
           scenariosToUse = allScenarios.slice(0, numQuestionsToUse);
+          
+          // Check if AI follow-up questions are enabled
+          const numAiQuestions = settings?.aiGeneratedQuestions || 0;
+          if (numAiQuestions > 0) {
+            console.log(`🤖 Setting max follow-up questions per scenario to ${numAiQuestions}`);
+            
+            // Instead of generating all follow-up questions upfront,
+            // we'll just set the maximum number of follow-ups allowed per scenario
+            setMaxFollowUps(numAiQuestions);
+            
+            // Initialize the follow-up map to track follow-ups per question
+            const initialFollowUpMap: {[key: number]: number} = {};
+            scenariosToUse.forEach((_, index) => {
+              initialFollowUpMap[index + 1] = 0; // No follow-ups generated initially
+            });
+            setFollowUpMap(initialFollowUpMap);
+            
+            toast({ 
+              title: `Adaptive Follow-up Questions Enabled`,
+              description: `Up to ${numAiQuestions} follow-up questions will be generated based on your answers.`
+            });
+          } else {
+            // No AI follow-up questions enabled
+            setMaxFollowUps(0);
+          }
         }
         if (settings?.timeLimit) {
           setTimeLimit(settings.timeLimit);
@@ -161,10 +189,16 @@ function SJTInterviewPage() {
 
     setSjtScenarios(scenariosToUse);
 
+    // Create history with all the scenario data needed for AI analysis
     const history = scenariosToUse.map(s => ({ 
-      question: `Situation: ${s.situation}\n\nQuestion: ${s.question}`, 
+      question: `Situation: ${s.situation}\n\nQuestion: ${s.question}`,
       answer: null, 
-      videoDataUri: undefined 
+      videoDataUri: undefined,
+      // Add admin-defined criteria fields for AI analysis
+      situation: s.situation,
+      bestResponseRationale: s.bestResponseRationale,
+      worstResponseRationale: s.worstResponseRationale,
+      assessedCompetency: s.assessedCompetency
     }));
     setConversationHistory(history);
     
@@ -195,15 +229,33 @@ function SJTInterviewPage() {
         // First, save the submission to database immediately
         console.log('💾 Saving submission to database...');
         
-        // Create a basic result structure
+        // Extract competencies from scenarios
+        const assessedCompetencies = sjtScenarios
+          .filter((_, index) => conversationHistory[index]?.answer) // Only include answered scenarios
+          .map(scenario => scenario.assessedCompetency)
+          .filter(Boolean);
+        
+        // Count unique competencies
+        const uniqueCompetencies = [...new Set(assessedCompetencies)];
+        
+        // Generate competency scores (initially all the same placeholder value)
+        const competencyScores = uniqueCompetencies.map(competency => ({
+          name: competency,
+          score: 5 // Placeholder middle score - will be replaced by AI analysis
+        }));
+        
+        // Create a basic result structure with proper competencies
         const basicResult: AnalysisResult = {
             strengths: `Candidate completed ${answeredHistory.length} out of ${sjtScenarios.length} scenarios. Responses demonstrate engagement with the situational judgement test.`,
             weaknesses: "Detailed analysis pending. Please review individual responses for comprehensive feedback.",
-            summary: `SJT Assessment completed on ${new Date().toLocaleDateString()}. ${answeredHistory.length} scenarios answered out of ${sjtScenarios.length} total scenarios.`,
-            competencyAnalysis: [{
-                name: "SJT Completion",
+            summary: `SJT Assessment completed on ${new Date().toLocaleDateString()}. ${answeredHistory.length} scenarios answered out of ${sjtScenarios.length} total scenarios. Analysis will evaluate ${uniqueCompetencies.length} competency areas.`,
+            competencyAnalysis: competencyScores.length > 0 ? [{
+                name: "Situational Competencies",
+                competencies: competencyScores
+            }] : [{
+                name: "Assessment Completion",
                 competencies: [{
-                    name: "Participation",
+                    name: "Overall Participation",
                     score: Math.round((answeredHistory.length / sjtScenarios.length) * 10)
                 }]
             }]
@@ -240,6 +292,7 @@ function SJTInterviewPage() {
   }, [conversationHistory, preInterviewDetails, saveSubmission, sjtScenarios, toast, showReport]);
 
 
+  // Import evaluate-answer-quality at the top of the file
   const handleAnswerSubmit = async (answer: string, videoDataUri?: string) => {
     setIsSavingAnswer(true);
     const updatedHistory = [...conversationHistory];
@@ -249,15 +302,166 @@ function SJTInterviewPage() {
       videoDataUri,
     };
     setConversationHistory(updatedHistory);
-    toast({
+    
+    // Identify if this is a base question or a follow-up
+    const currentScenario = sjtScenarios.find(s => {
+      const questionText = updatedHistory[currentQuestionIndex].question;
+      return questionText.includes(s.situation) && questionText.includes(s.question);
+    });
+    
+    if (!currentScenario) {
+      console.error("Could not identify current scenario for answer evaluation");
+      toast({
         title: "Answer Saved!",
         description: "You can move to the next question or review your answer.",
-    });
-    // Move to next question automatically
-    if (currentQuestionIndex < conversationHistory.length - 1) {
-      setCurrentQuestionIndex(currentQuestionIndex + 1);
+      });
+      setIsSavingAnswer(false);
+      
+      // Move to next question automatically
+      if (currentQuestionIndex < conversationHistory.length - 1) {
+        setCurrentQuestionIndex(currentQuestionIndex + 1);
+      }
+      return;
     }
-    setIsSavingAnswer(false);
+    
+    // Get the base question number (ID that appears in the question text)
+    const baseQuestionNumber = sjtScenarios.findIndex(s => s.id === currentScenario.id) + 1;
+    
+    // Determine if this is already a follow-up or a base question
+    const isFollowUp = updatedHistory[currentQuestionIndex].question.match(/\d+\.[a-z]\)/);
+    
+    // If it's a follow-up, we don't generate more follow-ups (only one level of follow-ups)
+    if (isFollowUp) {
+      toast({
+        title: "Follow-up Answer Saved!",
+        description: "Moving to the next question.",
+      });
+      setIsSavingAnswer(false);
+      
+      // Move to next question automatically
+      if (currentQuestionIndex < conversationHistory.length - 1) {
+        setCurrentQuestionIndex(currentQuestionIndex + 1);
+      }
+      return;
+    }
+    
+    try {
+      // Get current follow-up count for this base question
+      const currentFollowUpCount = followUpMap[baseQuestionNumber] || 0;
+      
+      // If we already have max follow-ups or max configured is 0, skip evaluation
+      if (currentFollowUpCount >= maxFollowUps || maxFollowUps === 0) {
+        console.log(`Skipping follow-up evaluation: current=${currentFollowUpCount}, max=${maxFollowUps}`);
+        toast({
+          title: "Answer Saved!",
+          description: "Moving to the next question.",
+        });
+        setIsSavingAnswer(false);
+        
+        // Move to next question automatically
+        if (currentQuestionIndex < conversationHistory.length - 1) {
+          setCurrentQuestionIndex(currentQuestionIndex + 1);
+        }
+        return;
+      }
+      
+      toast({
+        title: "Evaluating your answer...",
+        description: "Please wait while we analyze your response.",
+      });
+      
+      // Prepare input for evaluation
+      const evaluationInput = {
+        situation: currentScenario.situation,
+        question: currentScenario.question,
+        bestResponseRationale: currentScenario.bestResponseRationale,
+        assessedCompetency: currentScenario.assessedCompetency,
+        candidateAnswer: answer,
+        questionNumber: baseQuestionNumber,
+        followUpCount: currentFollowUpCount,
+        maxFollowUps: maxFollowUps
+      };
+      
+      console.log("🔍 Evaluating answer quality:", evaluationInput);
+      
+      // Use the API route to evaluate the answer quality
+      const response = await fetch('/api/ai/evaluate-answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(evaluationInput)
+      });
+      
+      if (!response.ok) {
+        throw new Error(`API responded with status: ${response.status}`);
+      }
+      
+      const evaluation = await response.json();
+      console.log("✅ Answer evaluation result:", evaluation);
+      
+      // Check if answer is complete or if we need a follow-up question
+      if (!evaluation.isComplete && evaluation.followUpQuestion) {
+        // Create a new follow-up question
+        const newFollowUpScenario: Scenario = {
+          id: currentScenario.id + 1000 + currentFollowUpCount, // Unique ID for follow-up
+          situation: currentScenario.situation,
+          question: evaluation.followUpQuestion,
+          bestResponseRationale: currentScenario.bestResponseRationale,
+          worstResponseRationale: currentScenario.worstResponseRationale,
+          assessedCompetency: currentScenario.assessedCompetency
+        };
+        
+        // Add the new scenario to our list
+        const updatedScenarios = [...sjtScenarios];
+        updatedScenarios.splice(currentQuestionIndex + 1, 0, newFollowUpScenario);
+        setSjtScenarios(updatedScenarios);
+        
+        // Create conversation entry for the new follow-up
+        const newConversationEntry = {
+          question: `Situation: ${newFollowUpScenario.situation}\n\nQuestion: ${newFollowUpScenario.question}`,
+          answer: null,
+          videoDataUri: undefined,
+          situation: newFollowUpScenario.situation,
+          bestResponseRationale: newFollowUpScenario.bestResponseRationale,
+          worstResponseRationale: newFollowUpScenario.worstResponseRationale,
+          assessedCompetency: newFollowUpScenario.assessedCompetency
+        };
+        
+        // Update conversation history with new follow-up
+        const newHistory = [...updatedHistory];
+        newHistory.splice(currentQuestionIndex + 1, 0, newConversationEntry);
+        setConversationHistory(newHistory);
+        
+        // Update follow-up count for this base question
+        setFollowUpMap({
+          ...followUpMap,
+          [baseQuestionNumber]: currentFollowUpCount + 1
+        });
+        
+        // Update question times array to match new structure
+        const newQuestionTimes = [...questionTimes];
+        newQuestionTimes.splice(currentQuestionIndex + 1, 0, 0);
+        setQuestionTimes(newQuestionTimes);
+        
+        toast({
+          title: "Follow-up Question Generated",
+          description: evaluation.rationale,
+        });
+      } else {
+        toast({
+          title: "Answer Complete",
+          description: evaluation.rationale,
+        });
+      }
+    } catch (error) {
+      console.error("Error evaluating answer quality:", error);
+    } finally {
+      setIsSavingAnswer(false);
+      
+      // Move to next question automatically
+      if (currentQuestionIndex < conversationHistory.length - 1) {
+        setCurrentQuestionIndex(currentQuestionIndex + 1);
+      }
+    }
   };
   
   useEffect(() => {
