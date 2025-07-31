@@ -324,25 +324,26 @@ function SJTInterviewPage() {
       return;
     }
     
-    // Get the base question number (ID that appears in the question text)
-    const baseQuestionNumber = sjtScenarios.findIndex(s => s.id === currentScenario.id) + 1;
-    
     // Determine if this is already a follow-up or a base question
     const isFollowUp = updatedHistory[currentQuestionIndex].question.match(/\d+\.[a-z]\)/);
     
-    // If it's a follow-up, we don't generate more follow-ups (only one level of follow-ups)
+    // Get or extract the base question number depending on whether this is a follow-up
+    let baseQuestionNumber;
+    
     if (isFollowUp) {
-      toast({
-        title: "Follow-up Answer Saved!",
-        description: "Moving to the next question.",
-      });
-      setIsSavingAnswer(false);
-      
-      // Move to next question automatically
-      if (currentQuestionIndex < conversationHistory.length - 1) {
-        setCurrentQuestionIndex(currentQuestionIndex + 1);
+      // Extract base question number from the follow-up question format (e.g., "1.a)" -> 1)
+      const match = updatedHistory[currentQuestionIndex].question.match(/(\d+)\.[a-z]\)/);
+      if (match && match[1]) {
+        baseQuestionNumber = parseInt(match[1]);
+      } else {
+        console.error("Could not extract base question number from follow-up");
+        baseQuestionNumber = currentScenario.id;
       }
-      return;
+      
+      console.log(`This is follow-up question for base question ${baseQuestionNumber}`);
+    } else {
+      // For base questions, get the question number from the scenario ID
+      baseQuestionNumber = sjtScenarios.findIndex(s => s.id === currentScenario.id) + 1;
     }
     
     try {
@@ -355,6 +356,7 @@ function SJTInterviewPage() {
         toast({
           title: "Answer Saved!",
           description: "Moving to the next question.",
+          duration: 3000,
         });
         setIsSavingAnswer(false);
         
@@ -365,9 +367,14 @@ function SJTInterviewPage() {
         return;
       }
       
+      // For follow-up questions, we need to increment the follow-up count for the base question
+      // but use the same base question number for tracking
+      
       toast({
         title: "Evaluating your answer...",
         description: "Please wait while we analyze your response.",
+        duration: 5000, // 5 seconds duration
+        className: "bg-blue-50 border border-blue-200 text-blue-800",
       });
       
       // Prepare input for evaluation
@@ -415,9 +422,10 @@ function SJTInterviewPage() {
         updatedScenarios.splice(currentQuestionIndex + 1, 0, newFollowUpScenario);
         setSjtScenarios(updatedScenarios);
         
-        // Create conversation entry for the new follow-up
+        // Create conversation entry for the new follow-up with improved formatting
         const newConversationEntry = {
-          question: `Situation: ${newFollowUpScenario.situation}\n\nQuestion: ${newFollowUpScenario.question}`,
+          // Format the question with proper spacing and highlighting for follow-up
+          question: `Situation: ${newFollowUpScenario.situation}\n\nFollow-up Question: ${newFollowUpScenario.question}`,
           answer: null,
           videoDataUri: undefined,
           situation: newFollowUpScenario.situation,
@@ -445,11 +453,15 @@ function SJTInterviewPage() {
         toast({
           title: "Follow-up Question Generated",
           description: evaluation.rationale,
+          duration: 5000, // 5 seconds duration
+          className: "bg-green-50 border border-green-200 text-green-800", 
         });
       } else {
         toast({
           title: "Answer Complete",
           description: evaluation.rationale,
+          duration: 5000, // 5 seconds duration
+          className: "bg-green-50 border border-green-200 text-green-800",
         });
       }
     } catch (error) {

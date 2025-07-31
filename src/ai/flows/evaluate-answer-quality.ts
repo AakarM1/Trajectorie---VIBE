@@ -116,6 +116,10 @@ const evaluateAnswerQualityFlow = ai.defineFlow(
               output.followUpQuestion = `${expectedPrefix} ${output.followUpQuestion}`;
             }
           }
+          
+          // Add proper spacing and formatting for follow-up questions
+          // Ensure there's a line break after "Situation:" to improve readability
+          output.followUpQuestion = output.followUpQuestion.trim();
         }
         
         return output;
