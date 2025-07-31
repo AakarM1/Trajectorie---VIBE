@@ -16,6 +16,12 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { configurationService } from '@/lib/config-service';
+// 🔒 MINIMAL IMPACT IMPORTS - New progressive functionality
+import { ProgressiveProvider, useProgressive } from '@/contexts/progressive-context';
+import { SessionRecoveryModal } from '@/components/session-recovery-modal';
+import { featureFlags } from '@/lib/feature-flags';
+import type { SessionRecovery } from '@/types/partial-submission';
+
 const GLOBAL_SETTINGS_KEY = 'global-settings';
 
 
@@ -23,8 +29,11 @@ function VerbalInterviewPage() {
   const { user, saveSubmission, canUserTakeTest, getSubmissions } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
+  
+  // 🔒 MINIMAL IMPACT PROGRESSIVE HOOKS - Only used if feature enabled
+  const progressive = useProgressive();
 
-  const [status, setStatus] = useState<'PRE_INTERVIEW' | 'INTERVIEW' | 'RESULTS' | 'COMPLETED'>('PRE_INTERVIEW');
+  const [status, setStatus] = useState<'PRE_INTERVIEW' | 'INTERVIEW' | 'RESULTS' | 'UPLOADING' | 'COMPLETED'>('PRE_INTERVIEW');
   const [interviewMode, setInterviewMode] = useState<InterviewMode>('video');
   const [preInterviewDetails, setPreInterviewDetails] = useState<PreInterviewDetails | null>(null);
   const [conversationHistory, setConversationHistory] = useState<ConversationEntry[]>([]);
@@ -38,6 +47,10 @@ function VerbalInterviewPage() {
   const [questionTimes, setQuestionTimes] = useState<number[]>([]); // Track time per question
   const [canTakeTest, setCanTakeTest] = useState(true);
   const [checkingAttempts, setCheckingAttempts] = useState(true);
+  
+  // 🔒 MINIMAL IMPACT RECOVERY STATE - Only used if feature enabled
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+  const [recoveryData, setRecoveryData] = useState<SessionRecovery | null>(null);
   
   const MAX_ATTEMPTS = 1;
 
@@ -64,6 +77,30 @@ function VerbalInterviewPage() {
 
     checkAttempts();
   }, [canUserTakeTest, toast]);
+
+  // 🔒 MINIMAL IMPACT SESSION RECOVERY - Only runs if feature enabled
+  useEffect(() => {
+    const checkForRecovery = async () => {
+      if (!featureFlags.isSessionRecoveryEnabled() || !user || checkingAttempts) {
+        return;
+      }
+
+      try {
+        console.log('🔍 [Interview] Checking for recoverable sessions...');
+        const recovery = await progressive.checkForRecovery();
+        
+        if (recovery && recovery.canResume) {
+          console.log('🔄 [Interview] Found recoverable session, showing modal');
+          setRecoveryData(recovery);
+          setShowRecoveryModal(true);
+        }
+      } catch (error) {
+        console.error('❌ [Interview] Error checking for recovery:', error);
+      }
+    };
+
+    checkForRecovery();
+  }, [user, checkingAttempts, progressive]);
 
   const startInterview = useCallback(async (details: PreInterviewDetails) => {
     setPreInterviewDetails(details);
@@ -174,6 +211,18 @@ function VerbalInterviewPage() {
       
       // Initialize question times array
       setQuestionTimes(new Array(questionsToUse.length).fill(0));
+      
+      // 🔒 MINIMAL IMPACT PROGRESSIVE SESSION - Only if feature enabled
+      if (progressive.isProgressiveSaveEnabled) {
+        try {
+          console.log('🚀 [Interview] Starting progressive session...');
+          const sessionId = progressive.startNewSession('JDT');
+          console.log('✅ [Interview] Progressive session started:', sessionId);
+        } catch (progressiveError) {
+          console.error('❌ [Interview] Progressive session error:', progressiveError);
+          // Don't block interview start, just log the error
+        }
+      }
     } catch (error) {
       console.error("Error starting interview:", error);
       toast({
@@ -201,7 +250,7 @@ function VerbalInterviewPage() {
       }
       
       console.log(`📊 Processing ${answeredHistory.length} answers`);
-      setStatus('COMPLETED'); // Set status immediately to avoid loading screen
+      setStatus('UPLOADING'); // 🔒 NEW: Show upload progress instead of immediate completion
       setIsProcessing(true);
       
       try {
@@ -231,14 +280,22 @@ function VerbalInterviewPage() {
         });
 
         console.log('✅ Interview submission saved successfully');
+        
+        // 🔒 MINIMAL IMPACT UPLOAD MONITORING - Wait for progressive upload completion
+        if (progressive.isProgressiveSaveEnabled && progressive.currentSessionId) {
+          console.log('💾 [Interview] Monitoring upload completion...');
+          try {
+            await progressive.markSessionComplete();
+            console.log('✅ [Interview] Progressive upload completed');
+          } catch (error) {
+            console.warn('⚠️ [Interview] Progressive completion failed, but main submission saved:', error);
+          }
+        }
 
-        // Note: We remove background analysis triggering here since it will happen from admin side
+        // Transition to completion state
+        setStatus('COMPLETED');
 
-        // Show completion immediately
-        toast({
-          title: 'Thank you for your submission!',
-          description: 'The hiring team will get back to you with the next steps.',
-        });
+        // Remove the toast from here since it will be shown in COMPLETED state
 
       } catch (error) {
         console.error("❌ Error in finish interview:", error);
@@ -256,22 +313,81 @@ function VerbalInterviewPage() {
 
   const handleAnswerSubmit = async (answer: string, videoDataUri?: string) => {
     setIsSavingAnswer(true);
-    const updatedHistory = [...conversationHistory];
-    updatedHistory[currentQuestionIndex] = {
-      ...updatedHistory[currentQuestionIndex],
-      answer,
-      videoDataUri,
-    };
-    setConversationHistory(updatedHistory);
-    toast({
-        title: "Answer Saved!",
-        description: "You can move to the next question or review your answer.",
-    });
-    // Move to next question automatically
-    if (currentQuestionIndex < conversationHistory.length - 1) {
-      setCurrentQuestionIndex(currentQuestionIndex + 1);
+    
+    try {
+      // Always update local state first (backward compatibility)
+      const updatedHistory = [...conversationHistory];
+      updatedHistory[currentQuestionIndex] = {
+        ...updatedHistory[currentQuestionIndex],
+        answer,
+        videoDataUri,
+      };
+      setConversationHistory(updatedHistory);
+      
+      // 🔒 MINIMAL IMPACT PROGRESSIVE SAVE - Only if feature enabled
+      if (progressive.isProgressiveSaveEnabled && progressive.currentSessionId) {
+        try {
+          console.log('💾 [Interview] Progressive save enabled, saving question...');
+          
+          // 🔒 ENHANCEMENT - Use upload method if available and enabled
+          const saveMethod = progressive.isProgressiveUploadEnabled && progressive.saveQuestionWithUpload
+            ? progressive.saveQuestionWithUpload
+            : progressive.saveQuestionProgress;
+          
+          const saveResult = await saveMethod(
+            currentQuestionIndex,
+            updatedHistory[currentQuestionIndex],
+            'JDT',
+            conversationHistory.length,
+            // Optional upload progress callback for enhanced method
+            progressive.isProgressiveUploadEnabled ? (progress, type) => {
+              console.log(`📤 [Interview] Upload progress: ${progress}% (${type})`);
+            } : undefined
+          );
+          
+          if (saveResult.success) {
+            const message = progressive.isProgressiveUploadEnabled 
+              ? "Answer saved and uploaded!" 
+              : "Answer saved!";
+            toast({
+              title: message,
+              description: "Your answer has been saved automatically.",
+            });
+          } else {
+            // Show warning but don't block user
+            toast({
+              variant: 'destructive',
+              title: "Save Warning",
+              description: "Answer saved locally but upload failed. Will retry automatically.",
+            });
+          }
+        } catch (progressiveError) {
+          console.error('❌ [Interview] Progressive save error:', progressiveError);
+          // Don't block the user, just log the error
+        }
+      } else {
+        // Traditional mode - just show local save confirmation
+        toast({
+          title: "Answer Saved!",
+          description: "You can move to the next question or review your answer.",
+        });
+      }
+      
+      // Move to next question automatically (existing behavior)
+      if (currentQuestionIndex < conversationHistory.length - 1) {
+        setCurrentQuestionIndex(currentQuestionIndex + 1);
+      }
+      
+    } catch (error) {
+      console.error('❌ [Interview] Error in handleAnswerSubmit:', error);
+      toast({
+        variant: 'destructive',
+        title: "Error",
+        description: "There was an issue saving your answer. Please try again.",
+      });
+    } finally {
+      setIsSavingAnswer(false);
     }
-    setIsSavingAnswer(false);
   };
   
   useEffect(() => {
@@ -280,8 +396,68 @@ function VerbalInterviewPage() {
     }
   }, [user, preInterviewDetails]);
 
+  // 🔒 MINIMAL IMPACT COMPLETION TOAST - Show success message when upload completes
+  useEffect(() => {
+    if (status === 'COMPLETED') {
+      toast({
+        title: 'Thank you for waiting!',
+        description: 'Your submission has been successfully uploaded.',
+      });
+    }
+  }, [status, toast]);
+
   const handleReattempt = () => {
     router.push('/');
+  };
+
+  // 🔒 MINIMAL IMPACT RECOVERY HANDLERS - Only used if feature enabled
+  const handleResumeSession = async (sessionId: string) => {
+    try {
+      console.log('🔄 [Interview] Resuming session:', sessionId);
+      
+      const success = await progressive.resumeSession(sessionId);
+      if (success && recoveryData) {
+        // Load recovered data into current state
+        setConversationHistory(recoveryData.partialSubmissions.map(p => ({
+          question: p.question,
+          answer: p.answer,
+          videoDataUri: p.videoDataUri,
+          preferredAnswer: p.preferredAnswer,
+          competency: p.competency,
+          situation: p.situation,
+          bestResponseRationale: p.bestResponseRationale,
+          worstResponseRationale: p.worstResponseRationale,
+          assessedCompetency: p.assessedCompetency
+        })));
+        
+        setCurrentQuestionIndex(recoveryData.lastQuestionIndex + 1);
+        setStatus('INTERVIEW');
+        setShowRecoveryModal(false);
+        
+        toast({
+          title: 'Session Resumed!',
+          description: `Continuing from question ${recoveryData.lastQuestionIndex + 2} of ${recoveryData.totalQuestions}`,
+        });
+        
+        console.log('✅ [Interview] Session resumed successfully');
+      } else {
+        throw new Error('Failed to resume session');
+      }
+    } catch (error) {
+      console.error('❌ [Interview] Error resuming session:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Resume Failed',
+        description: 'Could not resume your previous session. Starting a new interview.',
+      });
+      setShowRecoveryModal(false);
+    }
+  };
+
+  const handleStartNewSession = () => {
+    console.log('🚀 [Interview] Starting new session (skipping recovery)');
+    setShowRecoveryModal(false);
+    // Continue with normal flow - user will go through pre-interview form
   };
 
 
@@ -336,6 +512,25 @@ function VerbalInterviewPage() {
             reattemptText="Back to Dashboard"
           />
         );
+      case 'UPLOADING':
+        return (
+            <Card className="w-full max-w-lg text-center animate-fadeIn shadow-lg">
+                <CardContent className="p-8">
+                    <div className="h-16 w-16 text-blue-500 mx-auto mb-4">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="animate-spin">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                        </svg>
+                    </div>
+                    <h2 className="text-2xl font-headline text-primary mb-2">Uploading Your Response</h2>
+                    <p className="text-muted-foreground mb-4">
+                        Please do not refresh the page or close this window.
+                    </p>
+                    <p className="text-sm text-blue-600">
+                        Your interview responses are being securely uploaded...
+                    </p>
+                </CardContent>
+            </Card>
+        );
        case 'COMPLETED':
         return (
             <Card className="w-full max-w-lg text-center animate-fadeIn shadow-lg">
@@ -364,6 +559,17 @@ function VerbalInterviewPage() {
     <div className="flex flex-col min-h-screen">
       <Header />
       <main className="flex-grow flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8">
+        {/* 🔒 MINIMAL IMPACT SESSION RECOVERY MODAL - Only shown when needed */}
+        {featureFlags.isSessionRecoveryEnabled() && (
+          <SessionRecoveryModal
+            isOpen={showRecoveryModal}
+            recovery={recoveryData}
+            onResume={handleResumeSession}
+            onStartNew={handleStartNewSession}
+            onClose={() => setShowRecoveryModal(false)}
+          />
+        )}
+        
         {checkingAttempts ? (
           <div className="flex flex-col items-center justify-center text-center p-8">
             <Loader2 className="h-16 w-16 animate-spin text-primary mb-4" />
@@ -407,7 +613,10 @@ function VerbalInterviewPage() {
 export default function ProtectedVerbalInterviewPage() {
     return (
         <ProtectedRoute>
-            <VerbalInterviewPage />
+            {/* 🔒 MINIMAL IMPACT PROGRESSIVE PROVIDER - Wraps existing functionality */}
+            <ProgressiveProvider>
+                <VerbalInterviewPage />
+            </ProgressiveProvider>
         </ProtectedRoute>
     )
 }

@@ -16,6 +16,13 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { configurationService } from '@/lib/config-service';
+// 🔒 MINIMAL IMPACT IMPORTS - Progressive upload support for SJT
+import { ProgressiveProvider, useProgressive } from '@/contexts/progressive-context';
+// Note: SessionRecoveryModal is imported but will be used in a separate PR
+// import { SessionRecoveryModal } from '@/components/session-recovery-modal';
+import { ProgressiveUploadIndicator } from '@/components/progressive-upload-indicator';
+import { featureFlags } from '@/lib/feature-flags';
+import type { SessionRecovery, ProgressInfo, SaveResult } from '@/types/partial-submission';
 
 
 interface Scenario {
@@ -52,8 +59,11 @@ function SJTInterviewPage() {
   const { user, saveSubmission, canUserTakeTest, getSubmissions } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
+  
+  // 🔒 MINIMAL IMPACT PROGRESSIVE HOOKS - Only used if feature enabled for SJT
+  const progressive = useProgressive();
 
-  const [status, setStatus] = useState<'PRE_INTERVIEW' | 'INTERVIEW' | 'RESULTS' | 'COMPLETED'>('PRE_INTERVIEW');
+  const [status, setStatus] = useState<'PRE_INTERVIEW' | 'INTERVIEW' | 'RESULTS' | 'UPLOADING' | 'COMPLETED'>('PRE_INTERVIEW');
   const [interviewMode, setInterviewMode] = useState<InterviewMode>('video');
   const [preInterviewDetails, setPreInterviewDetails] = useState<PreInterviewDetails | null>(null);
   const [conversationHistory, setConversationHistory] = useState<ConversationEntry[]>([]);
@@ -100,6 +110,13 @@ function SJTInterviewPage() {
     setStatus('INTERVIEW');
     setPreInterviewDetails(details);
     setIsProcessing(true);
+    
+    // 🔒 MINIMAL IMPACT - Initialize progressive session
+    if (progressive.isProgressiveUploadEnabled) {
+      console.log('🚀 Initializing progressive session for SJT...');
+      const sessionId = progressive.startNewSession('SJT');
+      console.log('✅ Progressive session started with ID:', sessionId);
+    }
 
     let scenariosToUse = fallbackSjtScenarios;
 
@@ -222,8 +239,23 @@ function SJTInterviewPage() {
       }
       
       console.log(`📊 Processing ${answeredHistory.length} answers`);
-      setStatus('COMPLETED'); // Set status immediately to avoid loading screen
+      setStatus('UPLOADING'); // Set status to uploading first if progressive upload is enabled
       setIsProcessing(true);
+      
+      // 🔒 MINIMAL IMPACT - Mark progressive session complete if enabled
+      if (progressive.isProgressiveUploadEnabled && progressive.currentSessionId) {
+        console.log('🏁 Marking progressive session complete...');
+        try {
+          await progressive.markSessionComplete();
+          console.log('✅ Progressive session marked complete');
+        } catch (error) {
+          console.error('❌ Error marking progressive session complete:', error);
+          // Continue with submission anyway
+        }
+      }
+      
+      // Set completed status after uploads are done
+      setStatus('COMPLETED');
       
       try {
         // First, save the submission to database immediately
@@ -311,6 +343,37 @@ function SJTInterviewPage() {
     };
     setConversationHistory(updatedHistory);
     
+    // 🔒 MINIMAL IMPACT - Progressive upload if enabled
+    if (progressive.isProgressiveUploadEnabled && progressive.currentSessionId) {
+      console.log('🔄 Progressive upload enabled, saving answer with upload...');
+      try {
+        const result = await progressive.saveQuestionWithUpload(
+          currentQuestionIndex,
+          updatedHistory[currentQuestionIndex],
+          'SJT',
+          updatedHistory.length,
+          (progress, type) => {
+            // Show upload progress toast if it's taking time
+            if (progress === 25 || progress === 50 || progress === 75) {
+              toast({
+                title: `Uploading ${type} (${progress}%)`,
+                description: "Please wait while your response is being securely saved...",
+                duration: 2000,
+                className: "bg-blue-50 border border-blue-200 text-blue-800",
+              });
+            }
+          }
+        );
+        
+        if (!result.success) {
+          console.warn('⚠️ Progressive save failed, continuing with regular flow:', result.error);
+          // No need to show error to user - we'll continue with regular flow
+        }
+      } catch (error) {
+        console.error('❌ Error in progressive save:', error);
+        // Continue with regular flow, don't block the UI
+      }
+    }
     // Identify if this is a base question or a follow-up
     const currentScenario = sjtScenarios.find(s => {
       const questionText = updatedHistory[currentQuestionIndex].question;
@@ -489,6 +552,108 @@ function SJTInterviewPage() {
     }
   };
   
+  // 🔒 MINIMAL IMPACT - Session recovery on startup
+  useEffect(() => {
+    const checkForRecoverableSession = async () => {
+      if (!progressive.isProgressiveSaveEnabled || !user) {
+        return;
+      }
+      
+      try {
+        console.log('🔍 Checking for recoverable SJT session...');
+        const recovery = await progressive.checkForRecovery();
+        
+        if (recovery && recovery.interviewType === 'SJT' && recovery.canResume) {
+          console.log('🔄 Found recoverable SJT session:', recovery);
+          
+          // Set pre-interview details from recovery
+          setPreInterviewDetails({
+            name: recovery.candidateName,
+            roleCategory: "Situational Judgement Test",
+            language: 'English'
+          });
+          
+          // Show session recovery modal with confirmation option
+          // Currently importing the SessionRecoveryModal component and using it here
+          // Note: Actual implementation depends on how session recovery UI is designed
+          
+          // For now, we'll implement a basic toast notification
+          toast({
+            title: "Session Recovery Available",
+            description: "You have a previous session that was interrupted. Would you like to continue?",
+            duration: 10000, // Long duration
+            action: (
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => {
+                    // Resume session
+                    progressive.resumeSession(recovery.sessionId);
+                    
+                    // Reconstruct conversation history from partial submissions
+                    const restoredHistory: ConversationEntry[] = new Array(recovery.totalQuestions).fill(null).map(() => ({
+                      question: '',
+                      answer: null,
+                    }));
+                    
+                    // Fill in recovered answers
+                    recovery.partialSubmissions.forEach(partial => {
+                      const entry: ConversationEntry = {
+                        question: partial.question || '',
+                        answer: null, // Initialize with null as required by type
+                      };
+                      
+                      // Add optional fields only if they exist
+                      if (partial.answer) entry.answer = partial.answer;
+                      if (partial.videoDataUri) entry.videoDataUri = partial.videoDataUri;
+                      if (partial.situation) entry.situation = partial.situation;
+                      if (partial.bestResponseRationale) entry.bestResponseRationale = partial.bestResponseRationale;
+                      if (partial.worstResponseRationale) entry.worstResponseRationale = partial.worstResponseRationale;
+                      if (partial.assessedCompetency) entry.assessedCompetency = partial.assessedCompetency;
+                      
+                      // Add to history
+                      restoredHistory[partial.questionIndex] = entry;
+                    });
+                    
+                    setConversationHistory(restoredHistory);
+                    setCurrentQuestionIndex(recovery.lastQuestionIndex + 1);
+                    setStatus('INTERVIEW');
+                    
+                    toast({
+                      title: "Session Resumed",
+                      description: `Restored ${recovery.completedQuestions} previous answers.`,
+                    });
+                  }}
+                >
+                  Resume
+                </Button>
+                <Button 
+                  variant="destructive" 
+                  size="sm"
+                  onClick={() => {
+                    // Discard and start new session
+                    progressive.startNewSession('SJT');
+                    toast({
+                      title: "New Session Started",
+                      description: "Previous session has been discarded.",
+                    });
+                  }}
+                >
+                  Start New
+                </Button>
+              </div>
+            ),
+          });
+        }
+      } catch (error) {
+        console.error('❌ Error checking for recoverable session:', error);
+      }
+    };
+    
+    checkForRecoverableSession();
+  }, [progressive, user, toast]);
+
   useEffect(() => {
     if (user && !preInterviewDetails) {
         setPreInterviewDetails({ name: user.candidateName, roleCategory: "Situational Judgement Test", language: 'English' });
@@ -502,6 +667,15 @@ function SJTInterviewPage() {
   const currentEntry = conversationHistory[currentQuestionIndex];
   const answeredQuestionsCount = conversationHistory.filter(entry => entry.answer !== null).length;
 
+  // 🔒 MINIMAL IMPACT - Check for any active uploads
+  const hasActiveUpload = useCallback(() => {
+    if (!progressive.isProgressiveUploadEnabled || !progressive.uploadProgress) {
+      return false;
+    }
+    
+    return progressive.uploadProgress.size > 0;
+  }, [progressive.isProgressiveUploadEnabled, progressive.uploadProgress]);
+  
   const renderContent = () => {
     switch (status) {
       case 'PRE_INTERVIEW':
@@ -514,6 +688,56 @@ function SJTInterviewPage() {
                 <h2 className="text-2xl font-headline text-primary">Loading Scenarios...</h2>
               </div>
            );
+        }
+        
+        // 🔒 MINIMAL IMPACT - Show upload indicator if uploads are in progress
+        if (progressive.isProgressiveUploadEnabled && hasActiveUpload()) {
+          // Get upload progress summary
+          let totalProgress = 0;
+          let count = 0;
+          progressive.uploadProgress.forEach((value) => {
+            totalProgress += value.progress;
+            count++;
+          });
+          const averageProgress = count > 0 ? Math.round(totalProgress / count) : 0;
+          
+          // Display an upload indicator
+          return (
+            <div className="w-full max-w-6xl flex flex-col items-center">
+              <div className="w-full rounded-md bg-blue-50 p-4 mb-4 flex items-center justify-between border border-blue-200">
+                <div className="flex items-center">
+                  <svg className="animate-pulse mr-2 h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  <span className="font-medium text-blue-700">Uploading media... ({averageProgress}%)</span>
+                </div>
+                <div className="w-1/3 bg-blue-200 rounded-full h-2">
+                  <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${averageProgress}%` }}></div>
+                </div>
+              </div>
+              
+              <Flashcard
+                key={currentQuestionIndex}
+                question={currentEntry.question}
+                questionNumber={currentQuestionIndex + 1}
+                totalQuestions={conversationHistory.length}
+                onAnswerSubmit={handleAnswerSubmit}
+                isProcessing={isSavingAnswer}
+                isVisible={true}
+                mode={interviewMode}
+                isAnswered={currentEntry.answer !== null}
+                onFinishInterview={handleFinishInterview}
+                answeredQuestionsCount={answeredQuestionsCount}
+                timeLimitInMinutes={timeLimit}
+                onTimeUp={handleFinishInterview}
+                currentQuestionIndex={currentQuestionIndex}
+                setCurrentQuestionIndex={setCurrentQuestionIndex}
+                conversationHistory={conversationHistory}
+                questionTimes={questionTimes}
+                setQuestionTimes={setQuestionTimes}
+              />
+            </div>
+          );
         }
         return (
           <div className="w-full max-w-6xl flex flex-col items-center">
@@ -548,7 +772,26 @@ function SJTInterviewPage() {
             reattemptText="Back to Dashboard"
           />
         );
-       case 'COMPLETED':
+       case 'UPLOADING':
+        return (
+            <Card className="w-full max-w-lg text-center animate-fadeIn shadow-lg">
+                <CardContent className="p-8">
+                    <div className="h-16 w-16 text-blue-500 mx-auto mb-4 animate-pulse">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                        </svg>
+                    </div>
+                    <h2 className="text-2xl font-headline text-primary mb-2">Finalizing your submission...</h2>
+                    <p className="text-muted-foreground mb-6">
+                        Please wait while we process your answers.
+                    </p>
+                    <div className="w-full bg-gray-200 rounded-full h-2.5 mb-6">
+                        <div className="bg-blue-600 h-2.5 rounded-full animate-pulse" style={{ width: '80%' }}></div>
+                    </div>
+                </CardContent>
+            </Card>
+        );
+      case 'COMPLETED':
         return (
             <Card className="w-full max-w-lg text-center animate-fadeIn shadow-lg">
                 <CardContent className="p-8">
@@ -575,6 +818,8 @@ function SJTInterviewPage() {
   return (
     <div className="flex flex-col min-h-screen">
       <Header />
+      {/* 🔒 MINIMAL IMPACT - Add progressive upload indicator */}
+      {progressive.isProgressiveUploadEnabled && <ProgressiveUploadIndicator />}
       <main className="flex-grow flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8">
         {checkingAttempts ? (
           <div className="flex flex-col items-center justify-center text-center p-8">
@@ -619,7 +864,9 @@ function SJTInterviewPage() {
 export default function ProtectedSJTInterviewPage() {
     return (
         <ProtectedRoute>
-            <SJTInterviewPage />
+            <ProgressiveProvider>
+                <SJTInterviewPage />
+            </ProgressiveProvider>
         </ProtectedRoute>
     )
 }
