@@ -9,6 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { FileSearch, ArrowLeft, Eye, Trash2, AlertTriangle, Download, Video, Mic, Type, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import Header from '@/components/header';
+import { getStorage, ref, getDownloadURL } from 'firebase/storage';
+import app from '@/lib/firebase';
 import type { Submission } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -24,6 +26,230 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+
+// Initialize Firebase Storage
+const storage = getStorage(app);
+
+/**
+ * Download blob from Firebase Storage URL with comprehensive CORS handling
+ */
+async function downloadFromFirebaseStorage(storageUrl: string): Promise<Blob> {
+  console.log(`🚀 [DEBUG] Starting download for URL: ${storageUrl}`);
+  console.log(`🚀 [DEBUG] URL length: ${storageUrl.length}`);
+  console.log(`🚀 [DEBUG] URL type: ${typeof storageUrl}`);
+  
+  try {
+    // Validate URL format first
+    if (!storageUrl || typeof storageUrl !== 'string' || storageUrl.length < 10) {
+      console.error(`❌ [DEBUG] Invalid URL format:`, { storageUrl, type: typeof storageUrl, length: storageUrl?.length });
+      throw new Error(`Invalid URL format: ${storageUrl}`);
+    }
+    
+    // Strategy 1: Use Firebase Storage SDK for authenticated downloads
+    if (storageUrl.includes('firebasestorage.googleapis.com')) {
+      console.log(`🔗 [DEBUG] Attempting Firebase Storage SDK download`);
+      
+      try {
+        // Extract the file path from the Firebase Storage URL
+        const urlParts = storageUrl.split('/o/')[1];
+        console.log(`🔍 [DEBUG] URL parts after /o/:`, urlParts);
+        
+        if (urlParts) {
+          const filePath = decodeURIComponent(urlParts.split('?')[0]);
+          console.log(`📁 [DEBUG] Extracted file path: ${filePath}`);
+          
+          // Use Firebase Storage SDK to get a fresh download URL
+          const storageRef = ref(storage, filePath);
+          console.log(`📄 [DEBUG] Created storage ref for path: ${filePath}`);
+          
+          const freshDownloadUrl = await getDownloadURL(storageRef);
+          console.log(`🔄 [DEBUG] Got fresh download URL from Firebase SDK: ${freshDownloadUrl.substring(0, 100)}...`);
+          
+          // Download using the fresh URL
+          const response = await fetch(freshDownloadUrl, {
+            method: 'GET',
+            headers: {
+              'Accept': '*/*',
+              'Cache-Control': 'no-cache'
+            }
+          });
+          
+          console.log(`📊 [DEBUG] Firebase SDK fetch response: ${response.status} ${response.statusText}`);
+          
+          if (response.ok) {
+            const blob = await response.blob();
+            console.log(`✅ [DEBUG] Firebase SDK download successful (${blob.size} bytes)`);
+            return blob;
+          } else {
+            console.warn(`⚠️ [DEBUG] Firebase SDK fetch failed: ${response.status} ${response.statusText}`);
+          }
+        } else {
+          console.warn(`⚠️ [DEBUG] Could not extract file path from URL: ${storageUrl}`);
+        }
+      } catch (sdkError) {
+        console.error(`❌ [DEBUG] Firebase SDK method failed:`, sdkError);
+        console.error(`❌ [DEBUG] SDK Error details:`, {
+          name: sdkError instanceof Error ? sdkError.name : 'Unknown',
+          message: sdkError instanceof Error ? sdkError.message : String(sdkError),
+          code: (sdkError as any)?.code || 'N/A'
+        });
+      }
+      
+      // Strategy 2: Direct download with authentication headers
+      console.log(`🔗 [DEBUG] Attempting direct authenticated download`);
+      try {
+        const authResponse = await fetch(storageUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': '*/*',
+            'Cache-Control': 'no-cache',
+            'Access-Control-Request-Method': 'GET',
+            'Access-Control-Request-Headers': 'Accept'
+          },
+          credentials: 'include',
+          mode: 'cors'
+        });
+        
+        console.log(`📊 [DEBUG] Auth fetch response: ${authResponse.status} ${authResponse.statusText}`);
+        
+        if (authResponse.ok) {
+          const blob = await authResponse.blob();
+          console.log(`✅ [DEBUG] Authenticated download successful (${blob.size} bytes)`);
+          return blob;
+        } else {
+          console.warn(`⚠️ [DEBUG] Auth fetch failed: ${authResponse.status} ${authResponse.statusText}`);
+        }
+      } catch (authError) {
+        console.error(`❌ [DEBUG] Authenticated download failed:`, authError);
+      }
+      
+      // Strategy 3: Simple fetch without credentials
+      console.log(`� Attempting simple download without credentials`);
+      try {
+        const simpleResponse = await fetch(storageUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': '*/*'
+          },
+          mode: 'cors'
+        });
+        
+        if (simpleResponse.ok) {
+          const blob = await simpleResponse.blob();
+          console.log(`✅ Simple download successful (${blob.size} bytes)`);
+          return blob;
+        }
+      } catch (simpleError) {
+        console.log(`⚠️ Simple download failed:`, simpleError);
+      }
+      
+      // Strategy 4: Proxy through our own API endpoint (CORS bypass)
+      console.log(`🔗 Attempting download through proxy API`);
+      try {
+        const proxyResponse = await fetch('/api/proxy-download', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ url: storageUrl })
+        });
+        
+        if (proxyResponse.ok) {
+          const blob = await proxyResponse.blob();
+          console.log(`✅ Proxy download successful (${blob.size} bytes)`);
+          return blob;
+        }
+      } catch (proxyError) {
+        console.log(`⚠️ Proxy download failed:`, proxyError);
+      }
+      
+      // Strategy 5: Last resort - invisible iframe download
+      console.log(`🔗 Attempting iframe download method`);
+      try {
+        const iframeBlob = await downloadViaIframe(storageUrl);
+        if (iframeBlob) {
+          console.log(`✅ Iframe download successful (${iframeBlob.size} bytes)`);
+          return iframeBlob;
+        }
+      } catch (iframeError) {
+        console.log(`⚠️ Iframe download failed:`, iframeError);
+      }
+    }
+    
+    // If it's a Firebase Storage path, get a fresh download URL
+    if (storageUrl.startsWith('submissions/')) {
+      console.log(`🔗 Getting fresh download URL for path: ${storageUrl}`);
+      const storageRef = ref(storage, storageUrl);
+      const downloadUrl = await getDownloadURL(storageRef);
+      
+      // Recursively call this function with the download URL
+      return await downloadFromFirebaseStorage(downloadUrl);
+    }
+    
+    throw new Error('All download strategies failed');
+  } catch (error) {
+    console.error('❌ Firebase Storage download error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Download via invisible iframe (bypasses CORS for some scenarios)
+ */
+function downloadViaIframe(url: string): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    try {
+      // Create invisible iframe
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = url;
+      
+      let resolved = false;
+      const cleanup = () => {
+        if (iframe.parentNode) {
+          iframe.parentNode.removeChild(iframe);
+        }
+      };
+      
+      // Timeout after 10 seconds
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          cleanup();
+          resolve(null);
+        }
+      }, 10000);
+      
+      iframe.onload = () => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          cleanup();
+          
+          // Try to fetch from the iframe's document
+          try {
+            fetch(url).then(response => response.blob()).then(resolve).catch(() => resolve(null));
+          } catch {
+            resolve(null);
+          }
+        }
+      };
+      
+      iframe.onerror = () => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          cleanup();
+          resolve(null);
+        }
+      };
+      
+      document.body.appendChild(iframe);
+    } catch {
+      resolve(null);
+    }
+  });
+}
 import JSZip from 'jszip';
 
 
@@ -144,38 +370,65 @@ const SubmissionsPage = () => {
 
             for (const [index, entry] of sub.history.entries()) {
                 if (entry.videoDataUri) {
+                    // Validate URL format
+                    if (!entry.videoDataUri || entry.videoDataUri.length < 10) {
+                        console.warn(`⚠️ Skipping Q${index + 1}: Invalid or empty videoDataUri`);
+                        continue;
+                    }
+                    
+                    // Type guard: ensure videoDataUri is defined for the rest of this block
+                    const videoDataUri: string = entry.videoDataUri;
+                    
                     // Check if it's a data URI or Firebase Storage URL
-                    const isDataUri = entry.videoDataUri.startsWith('data:');
+                    const isDataUri = videoDataUri.startsWith('data:');
                     const isVideo = isDataUri 
-                      ? entry.videoDataUri.startsWith('data:video')
-                      : entry.videoDataUri.includes('video') || entry.videoDataUri.includes('Q') && entry.videoDataUri.includes('_video');
+                      ? videoDataUri.startsWith('data:video')
+                      : videoDataUri.includes('_video.');
                     
                     if ((isVideo && downloadTypes.video) || (!isVideo && downloadTypes.audio)) {
+                        console.log(`🔍 Processing Q${index + 1}: ${isVideo ? 'video' : 'audio'} file`);
+                        console.log(`📝 URL type: ${isDataUri ? 'Data URI' : 'Storage URL'}`);
+                        console.log(`🔗 URL preview: ${videoDataUri.substring(0, 100)}...`);
+                        
                         try {
                             let blob: Blob;
                             let extension = 'webm';
                             
                             if (isDataUri) {
                                 // Handle data URI (original format)
-                                const response = await fetch(entry.videoDataUri);
-                                blob = await response.blob();
-                            } else {
-                                // Handle Firebase Storage URL
-                                console.log(`📥 Downloading media from Firebase Storage: ${entry.videoDataUri}`);
-                                const response = await fetch(entry.videoDataUri);
-                                if (!response.ok) {
-                                    throw new Error(`Failed to fetch from storage: ${response.statusText}`);
+                                try {
+                                    const response = await fetch(videoDataUri);
+                                    if (!response.ok) {
+                                        throw new Error(`Data URI fetch failed: ${response.status}`);
+                                    }
+                                    blob = await response.blob();
+                                    console.log(`✅ Successfully processed data URI (${blob.size} bytes)`);
+                                } catch (dataUriError: unknown) {
+                                    console.error(`❌ Data URI processing failed:`, dataUriError);
+                                    const errorMessage = dataUriError instanceof Error ? dataUriError.message : String(dataUriError);
+                                    throw new Error(`Data URI processing failed: ${errorMessage}`);
                                 }
-                                blob = await response.blob();
+                            } else {
+                                // Handle Firebase Storage URL with proper authentication
+                                console.log(`📥 Downloading media from Firebase Storage: ${videoDataUri}`);
+                                
+                                try {
+                                    blob = await downloadFromFirebaseStorage(videoDataUri);
+                                    console.log(`✅ Successfully downloaded from Firebase Storage (${blob.size} bytes)`);
+                                } catch (storageError: unknown) {
+                                    const errorMessage = storageError instanceof Error ? storageError.message : String(storageError);
+                                    console.error(`❌ Firebase Storage download failed:`, errorMessage);
+                                    throw new Error(`Firebase Storage download failed: ${errorMessage}`);
+                                }
                                 
                                 // Try to get extension from URL or blob type
-                                const urlParts = entry.videoDataUri.split('.');
+                                const urlParts = videoDataUri.split('.');
                                 if (urlParts.length > 1) {
                                     extension = urlParts[urlParts.length - 1].split('?')[0]; // Remove query params
                                 }
                             }
                             
-                            candidateFolder.file(`Q${index + 1}_${isVideo ? 'video' : 'audio'}.${extension}`, blob);
+                            candidateFolder.file(`Q${index + 1}_${isVideo ? 'video' : 'audio'}.${extension}`, blob!);
                         } catch (e) {
                             console.error(`Could not fetch media file for Q${index + 1}:`, e);
                             // Continue with other files even if one fails

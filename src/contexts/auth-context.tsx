@@ -293,12 +293,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           if (!entry.videoDataUri) return entry;
           
           // Dynamic import to avoid bundling issues
-          const { isDataUriTooLarge, dataUriToBlob, uploadMediaToStorage } = await import('@/lib/media-storage');
+          const { dataUriToBlob, uploadMediaToStorage } = await import('@/lib/media-storage');
           
-          // Check if the media file is too large for Firestore
-          if (isDataUriTooLarge(entry.videoDataUri)) {
+          // Always upload all media files to Firebase Storage (regardless of size)
+          if (entry.videoDataUri) {
             try {
-              console.log(`📎 Media file for Q${index + 1} is large, uploading to Firebase Storage...`);
+              console.log(`📎 Uploading Q${index + 1} media to Firebase Storage...`);
               
               // Convert data URI to blob
               const blob = await dataUriToBlob(entry.videoDataUri);

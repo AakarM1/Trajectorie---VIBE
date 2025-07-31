@@ -346,7 +346,7 @@ const ConversationSummary: React.FC<ConversationSummaryProps> = ({ analysisResul
                       {entry.videoDataUri && (
                       <div>
                           <p className="font-semibold text-sm mb-1">Recording:</p>
-                          {entry.videoDataUri.startsWith('data:video') ? (
+                          {(entry.videoDataUri.startsWith('data:video') || entry.videoDataUri.includes('_video.')) ? (
                               <video controls src={entry.videoDataUri} className="mt-2 w-full rounded-md" />
                           ) : (
                               <audio controls src={entry.videoDataUri} className="mt-2 w-full" />
