@@ -361,9 +361,9 @@ const Flashcard: React.FC<FlashcardProps> = ({
       isVisible ? 'animate-fadeIn' : 'opacity-0 pointer-events-none'
     )}>
       {isProcessing ? (
-        <div className="flex flex-col items-center justify-center h-96">
-          <Loader2 className="h-12 w-12 animate-spin text-primary" />
-          <p className="text-lg font-semibold text-primary mt-4">Saving Answer...</p>
+        <div className="flex flex-col items-center justify-center h-40 my-8 mx-auto px-8 py-6 bg-white rounded-lg shadow-md border border-gray-100 max-w-xs">
+          <Loader2 className="h-10 w-10 animate-spin text-green-600" />
+          <p className="text-base font-medium text-green-600 mt-3">Saving Answer...</p>
         </div>
       ) : (
         <>
