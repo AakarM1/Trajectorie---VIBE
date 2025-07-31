@@ -295,6 +295,14 @@ function SJTInterviewPage() {
   // Import evaluate-answer-quality at the top of the file
   const handleAnswerSubmit = async (answer: string, videoDataUri?: string) => {
     setIsSavingAnswer(true);
+    // Show saving toast with improved styling
+    toast({
+      title: "Saving Answer",
+      description: "Processing your response...",
+      duration: 3000,
+      className: "bg-gray-50 border border-gray-200 text-gray-800",
+    });
+    
     const updatedHistory = [...conversationHistory];
     updatedHistory[currentQuestionIndex] = {
       ...updatedHistory[currentQuestionIndex],
@@ -456,6 +464,11 @@ function SJTInterviewPage() {
           duration: 5000, // 5 seconds duration
           className: "bg-green-50 border border-green-200 text-green-800", 
         });
+        
+        // Move specifically to the follow-up question we just inserted
+        setIsSavingAnswer(false);
+        setCurrentQuestionIndex(currentQuestionIndex + 1);
+        return; // Exit early to avoid the automatic navigation in finally block
       } else {
         toast({
           title: "Answer Complete",
@@ -469,7 +482,7 @@ function SJTInterviewPage() {
     } finally {
       setIsSavingAnswer(false);
       
-      // Move to next question automatically
+      // Move to next question automatically only if we didn't generate a follow-up
       if (currentQuestionIndex < conversationHistory.length - 1) {
         setCurrentQuestionIndex(currentQuestionIndex + 1);
       }
