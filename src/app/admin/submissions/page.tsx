@@ -13,6 +13,7 @@ import { getStorage, ref, getDownloadURL } from 'firebase/storage';
 import app from '@/lib/firebase';
 import type { Submission } from '@/types';
 import { useToast } from '@/hooks/use-toast';
+import { detectFolderStructure } from '@/lib/folder-utils';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -57,6 +58,10 @@ async function downloadFromFirebaseStorage(storageUrl: string): Promise<Blob> {
         if (urlParts) {
           const filePath = decodeURIComponent(urlParts.split('?')[0]);
           console.log(`📁 [DEBUG] Extracted file path: ${filePath}`);
+          
+          // 🔒 DETECT FOLDER STRUCTURE - Log structure type for debugging
+          const structureType = detectFolderStructure(filePath);
+          console.log(`🏗️ [DEBUG] Detected ${structureType} folder structure`);
           
           // Use Firebase Storage SDK to get a fresh download URL
           const storageRef = ref(storage, filePath);
@@ -261,6 +266,7 @@ const SubmissionsPage = () => {
     const [downloadTypes, setDownloadTypes] = useState({ video: false, audio: false, text: false });
     const [isDownloading, setIsDownloading] = useState(false);
     const [isLoadingInitial, setIsLoadingInitial] = useState(true);
+    const [isDeleting, setIsDeleting] = useState<Record<string, boolean>>({});
 
     const fetchSubmissions = async () => {
         try {
@@ -297,19 +303,41 @@ const SubmissionsPage = () => {
 
     const handleDelete = async (id: string) => {
         try {
-            await deleteSubmission(id);
+            setIsDeleting(prev => ({ ...prev, [id]: true }));
+            
+            // Use the new cascading deletion API that removes both Firestore document and Storage files
+            const response = await fetch(`/api/submissions/${id}/delete`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: 'Deletion failed' }));
+                throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const result = await response.json();
+            console.log('✅ Cascading deletion completed:', result);
+            
+            // Enhanced success message to indicate file cleanup
+            const fileInfo = result.filesDeleted > 0 ? ` and ${result.filesDeleted} associated files` : '';
+            
             // No need to call fetchSubmissions - real-time listener will update
             toast({
                 title: 'Submission Deleted',
-                description: 'The selected interview report has been removed.',
+                description: `The selected interview report${fileInfo} have been removed.`,
             });
         } catch (error) {
             console.error('Error deleting submission:', error);
             toast({
                 variant: 'destructive',
                 title: 'Error deleting submission',
-                description: 'Failed to delete the submission.'
+                description: error instanceof Error ? error.message : 'Failed to delete the submission.'
             });
+        } finally {
+            setIsDeleting(prev => ({ ...prev, [id]: false }));
         }
     }
 
@@ -601,9 +629,19 @@ const SubmissionsPage = () => {
                                                     </Link>
                                                     <AlertDialog>
                                                         <AlertDialogTrigger asChild>
-                                                            <Button variant="ghost" size="icon">
-                                                                <Trash2 className="h-5 w-5 text-destructive" />
-                                                                <span className="sr-only">Delete</span>
+                                                            <Button 
+                                                                variant="ghost" 
+                                                                size="icon"
+                                                                disabled={isDeleting[sub.id]}
+                                                            >
+                                                                {isDeleting[sub.id] ? (
+                                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                                ) : (
+                                                                    <Trash2 className="h-5 w-5 text-destructive" />
+                                                                )}
+                                                                <span className="sr-only">
+                                                                    {isDeleting[sub.id] ? 'Deleting...' : 'Delete'}
+                                                                </span>
                                                             </Button>
                                                         </AlertDialogTrigger>
                                                         <AlertDialogContent>

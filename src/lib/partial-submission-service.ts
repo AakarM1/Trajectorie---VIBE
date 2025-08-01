@@ -83,6 +83,7 @@ export class PartialSubmissionService {
             data.sessionId,
             data.questionIndex,
             'video',
+            data.candidateName, // 🔒 PASS CANDIDATE NAME for user-named folders
             data.onUploadProgress
           );
           
@@ -351,6 +352,7 @@ export class PartialSubmissionService {
     sessionId: string,
     questionIndex: number,
     mediaType: 'video' | 'audio',
+    candidateName?: string, // 🔒 NEW PARAMETER for user-named folders
     onProgress?: (progress: number, type: 'video' | 'audio') => void
   ): Promise<{ uploaded: boolean; url?: string }> {
     try {
@@ -369,12 +371,13 @@ export class PartialSubmissionService {
       // Report progress start
       onProgress?.(0, mediaType);
       
-      // Upload to Firebase Storage using the same method as auth-context
+      // 🔒 ENHANCED UPLOAD - Pass candidate name for user-named folders
       const downloadURL = await mediaStorage.uploadMediaToStorage(
         blob, 
         sessionId, // Use sessionId instead of temp submission ID
         questionIndex, 
-        mediaType
+        mediaType,
+        candidateName // 🔒 NEW PARAMETER - enables user-named folders when available
       );
       
       // Report progress complete
