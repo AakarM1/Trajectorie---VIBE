@@ -61,29 +61,30 @@ const ReportDetailPage = () => {
         return hasBasicAnalysis;
     };
 
-    const generateAiAnalysis = async () => {
+    const generateAiAnalysis = async (forceRegenerate = false) => {
         if (!submission) return;
         
         setGeneratingAnalysis(true);
         setAnalysisError(null);
         
         try {
-            console.log('🤖 Generating AI analysis for submission:', submission.id);
+            console.log(`🤖 ${forceRegenerate ? 'Regenerating' : 'Generating'} AI analysis for submission:`, submission.id);
             
             const response = await fetch('/api/background-analysis', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     submissionId: submission.id,
-                    type: submission.testType.toLowerCase() === 'jdt' ? 'interview' : 'sjt'
+                    type: submission.testType.toLowerCase() === 'jdt' ? 'interview' : 'sjt',
+                    forceRegenerate
                 }),
             });
             
             if (!response.ok) {
-                throw new Error(`Analysis generation failed: ${response.status}`);
+                throw new Error(`Analysis ${forceRegenerate ? 'regeneration' : 'generation'} failed: ${response.status}`);
             }
             
-            console.log('✅ AI analysis generation triggered');
+            console.log(`✅ AI analysis ${forceRegenerate ? 'regeneration' : 'generation'} triggered`);
             
             // Poll for updates every 3 seconds, but with more lenient success detection
             const pollForUpdates = async () => {
@@ -123,9 +124,9 @@ const ReportDetailPage = () => {
             pollForUpdates();
             
         } catch (error) {
-            console.error('Error generating AI analysis:', error);
+            console.error(`Error ${forceRegenerate ? 'regenerating' : 'generating'} AI analysis:`, error);
             setGeneratingAnalysis(false);
-            setAnalysisError(error instanceof Error ? error.message : 'Failed to generate analysis');
+            setAnalysisError(error instanceof Error ? error.message : `Failed to ${forceRegenerate ? 'regenerate' : 'generate'} analysis`);
         }
     };
 
@@ -182,11 +183,37 @@ const ReportDetailPage = () => {
                                     </p>
                                 </div>
                                 <Button 
-                                    onClick={generateAiAnalysis}
+                                    onClick={() => generateAiAnalysis(false)}
                                     className="ml-4"
                                     disabled={generatingAnalysis}
                                 >
                                     Generate AI Analysis
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
+                
+                {!showAnalysisGeneration && !generatingAnalysis && submission.report && (
+                    <Card className="w-full max-w-4xl mb-6 border-blue-200 bg-blue-50">
+                        <CardContent className="p-6">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <h3 className="text-lg font-semibold text-blue-800 mb-2">
+                                        AI Analysis Complete
+                                    </h3>
+                                    <p className="text-blue-700">
+                                        This submission has comprehensive AI analysis. You can regenerate the analysis to get fresh insights with updated AI models.
+                                    </p>
+                                </div>
+                                <Button 
+                                    onClick={() => generateAiAnalysis(true)}
+                                    variant="outline"
+                                    className="ml-4 border-blue-300 text-blue-700 hover:bg-blue-100"
+                                    disabled={generatingAnalysis}
+                                >
+                                    <RefreshCw className="mr-2 h-4 w-4" />
+                                    Regenerate Analysis
                                 </Button>
                             </div>
                         </CardContent>
@@ -231,7 +258,7 @@ const ReportDetailPage = () => {
                                         Refresh Page
                                     </Button>
                                     <Button 
-                                        onClick={generateAiAnalysis}
+                                        onClick={() => generateAiAnalysis(false)}
                                         variant="outline"
                                         className="border-red-300 text-red-700 hover:bg-red-100"
                                     >

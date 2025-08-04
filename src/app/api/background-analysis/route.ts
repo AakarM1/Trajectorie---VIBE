@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
   try {
     console.log('🔄 Background report generation API called');
     
-    const { submissionId, type, analysisInput } = await request.json();
+    const { submissionId, type, analysisInput, forceRegenerate = false } = await request.json();
     
     if (!submissionId) {
       return NextResponse.json(
@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`🤖 Starting AI analysis for submission: ${submissionId}`);
+    console.log(`🤖 Starting AI analysis for submission: ${submissionId}${forceRegenerate ? ' (Force Regenerate)' : ''}`);
     
     let analysisResult: AnalysisResult;
     
@@ -106,39 +106,103 @@ export async function POST(request: NextRequest) {
         const improvementAreas = sjtAnalyses.filter(a => a.score < 7);
         const averageResponses = sjtAnalyses.filter(a => a.score >= 5 && a.score < 7);
         
-        // Generate detailed strengths
-        let strengthsText = "The candidate demonstrates several notable strengths in their situational judgment responses:\n\n";
+        // Generate detailed strengths organized by competency - AI driven only
+        let strengthsText = "";
         
-        if (strongResponses.length > 0) {
-          strongResponses.forEach((response, index) => {
-            strengthsText += `**${response.competency} Excellence**: ${response.rationale} This demonstrates strong ${response.competency.toLowerCase()} skills and professional maturity.\n\n`;
-          });
+        // Group all responses by competency (including low scores to check for negligible strengths)
+        const allCompetencyResponses = new Map<string, {responses: any[], scores: number[], rationales: string[]}>();
+        sjtAnalyses.forEach(response => {
+          if (!allCompetencyResponses.has(response.competency)) {
+            allCompetencyResponses.set(response.competency, {responses: [], scores: [], rationales: []});
+          }
+          const data = allCompetencyResponses.get(response.competency)!;
+          data.responses.push(response);
+          data.scores.push(response.score);
+          data.rationales.push(response.rationale);
+        });
+        
+        // Analyze each competency for strengths
+        Array.from(allCompetencyResponses.entries()).forEach(([competency, data]) => {
+          const avgScore = (data.scores.reduce((a, b) => a + b, 0) / data.scores.length).toFixed(1);
+          const hasStrengths = data.responses.some(r => r.score >= 5); // At least some positive performance
           
-          // Add summary of competencies excelled in
-          const strongCompetencies = strongResponses.map(r => r.competency);
-          strengthsText += `The candidate particularly excels in ${strongCompetencies.join(', ').replace(/, ([^,]*)$/, ', and $1')}, showing consistent professional judgment in these areas.`;
-        } else if (averageResponses.length > 0) {
-          strengthsText += "While no responses scored exceptionally high, the candidate shows solid foundational understanding in several areas:\n\n";
-          averageResponses.forEach((response, index) => {
-            strengthsText += `**${response.competency} Foundation**: Shows basic competency with room for growth. ${response.rationale}\n\n`;
-          });
+          if (hasStrengths) {
+            // Only show competencies where AI found actual strengths
+            const strengthResponses = data.responses.filter(r => r.score >= 5);
+            if (strengthResponses.length > 0) {
+              const strengthLevel = data.scores.every(s => s >= 8) ? 'Outstanding Performance' : 
+                                  data.scores.every(s => s >= 7) ? 'Strong Performance' : 
+                                  data.scores.every(s => s >= 5) ? 'Satisfactory Performance' : 
+                                  'Developing Performance';
+              
+              strengthsText += `${competency} (${strengthLevel} - Average: ${avgScore}/10):\n`;
+              
+              // Individual question analysis for this competency - only questions with scores >= 5
+              strengthResponses.forEach(response => {
+                const questionNum = sjtAnalyses.findIndex(a => a === response) + 1;
+                strengthsText += `Question ${questionNum}: ${response.rationale} (Score: ${response.score}/10)\n`;
+              });
+              
+              strengthsText += `\nDevelopment plan for ${competency}: Continue building on demonstrated capabilities. Focus on consistency and advanced application of skills in this competency area.\n\n`;
+            }
+          } else {
+            // AI found no meaningful strengths for this competency
+            strengthsText += `${competency} (Negligible Strengths - Average: ${avgScore}/10):\n`;
+            strengthsText += `This candidate shows negligible strengths for ${competency}.\n\n`;
+          }
+        });
+        
+        strengthsText += "ADDITIONAL STRENGTHS:\n\n";
+        
+        // Only add additional strengths if there are actual strong performances (7+)
+        if (strongResponses.length > 0) {
+          const strongCompetencies = [...new Set(strongResponses.map(r => r.competency))];
+          strengthsText += `Demonstrates excellence across ${strongCompetencies.length} competency area${strongCompetencies.length > 1 ? 's' : ''}: ${strongCompetencies.join(', ').replace(/, ([^,]*)$/, ', and $1')}.\n\n`;
         } else {
-          strengthsText += "The candidate shows engagement with the assessment process and demonstrates effort in responding to complex workplace scenarios. With focused development, there is potential for growth in professional judgment and decision-making skills.";
+          strengthsText += "No additional strengths identified beyond individual competency assessments.\n\n";
         }
         
-        // Generate detailed weaknesses  
-        let weaknessesText = "Areas for professional development and improvement:\n\n";
+        // Generate detailed weaknesses organized by competency - AI driven only
+        let weaknessesText = "";
         
         if (improvementAreas.length > 0) {
-          improvementAreas.forEach((response, index) => {
-            weaknessesText += `**${response.competency} Development**: ${response.rationale} Consider developing stronger ${response.competency.toLowerCase()} skills through targeted training and practice.\n\n`;
+          // Group weaknesses by competency for organized analysis
+          const competencyWeaknesses = new Map<string, {responses: any[], scores: number[], rationales: string[]}>();
+          improvementAreas.forEach(response => {
+            if (!competencyWeaknesses.has(response.competency)) {
+              competencyWeaknesses.set(response.competency, {responses: [], scores: [], rationales: []});
+            }
+            const data = competencyWeaknesses.get(response.competency)!;
+            data.responses.push(response);
+            data.scores.push(response.score);
+            data.rationales.push(response.rationale);
           });
           
-          // Add developmental recommendations
-          const improvementCompetencies = improvementAreas.map(r => r.competency);
-          weaknessesText += `Priority development areas include ${improvementCompetencies.join(', ').replace(/, ([^,]*)$/, ', and $1')}. Focused training in these competencies would significantly enhance professional effectiveness.`;
+          // Analyze each competency needing development
+          Array.from(competencyWeaknesses.entries()).forEach(([competency, data]) => {
+            const avgScore = (data.scores.reduce((a, b) => a + b, 0) / data.scores.length).toFixed(1);
+            const developmentLevel = data.scores.every(s => s < 4) ? 'Priority Development Required' : 
+                                   data.scores.every(s => s < 6) ? 'Focused Development Needed' : 
+                                   'Minor Enhancement Required';
+            
+            weaknessesText += `${competency} (${developmentLevel} - Average: ${avgScore}/10):\n`;
+            
+            // Individual question analysis for this competency
+            data.responses.forEach(response => {
+              const questionNum = sjtAnalyses.findIndex(a => a === response) + 1;
+              weaknessesText += `Question ${questionNum}: ${response.rationale} (Score: ${response.score}/10)\n`;
+            });
+            
+            weaknessesText += `\nDevelopment plan for ${competency}: ${data.scores.every(s => s < 4) ? 'Immediate and intensive development required through structured training, mentoring, and supervised practice.' : data.scores.every(s => s < 6) ? 'Focused development through targeted training programs and practical application opportunities.' : 'Minor improvements through skill refinement and additional practice scenarios.'}\n\n`;
+          });
+          
+          weaknessesText += "ADDITIONAL WEAKNESSES:\n\n";
+          
+          const improvementCompetencies = [...new Set(improvementAreas.map(r => r.competency))];
+          weaknessesText += `Development priorities should focus on: ${improvementCompetencies.join(', ').replace(/, ([^,]*)$/, ', and $1')}.\n\n`;
         } else {
-          weaknessesText += "No significant areas of concern identified. The candidate demonstrates consistent professional judgment across all assessed scenarios.";
+          weaknessesText += "ADDITIONAL WEAKNESSES:\n\n";
+          weaknessesText += "No significant development areas identified through AI analysis.\n\n";
         }
 
         // Process analyses to combine scores for the same competency
@@ -165,30 +229,43 @@ export async function POST(request: NextRequest) {
         const uniqueStrongCompetencies = [...new Set(strongResponses.map(r => r.competency))];
         const uniqueImprovementCompetencies = [...new Set(improvementAreas.map(r => r.competency))];
 
-        // Update the strength text to use unique competencies
-        if (strongResponses.length > 0 && uniqueStrongCompetencies.length > 0) {
-          // Replace the last part of the strengths text with unique competencies
-          const lastSentenceStart = strengthsText.lastIndexOf("The candidate particularly excels in");
-          if (lastSentenceStart !== -1) {
-            strengthsText = strengthsText.substring(0, lastSentenceStart) + 
-              `The candidate particularly excels in ${uniqueStrongCompetencies.join(', ').replace(/, ([^,]*)$/, ', and $1')}, showing consistent professional judgment in these areas.`;
-          }
-        }
+        // Enhanced comprehensive summary
+        const overallAvgScore = (sjtAnalyses.reduce((acc, a) => acc + a.score, 0) / (sjtAnalyses.length || 1));
+        const performanceLevel = overallAvgScore >= 8 ? 'Excellent' : 
+                               overallAvgScore >= 7 ? 'Very Good' : 
+                               overallAvgScore >= 6 ? 'Good' : 
+                               overallAvgScore >= 5 ? 'Satisfactory' : 'Needs Improvement';
+        
+        const summaryText = `COMPREHENSIVE ASSESSMENT SUMMARY:
 
-        // Update the weaknesses text to use unique competencies
-        if (improvementAreas.length > 0 && uniqueImprovementCompetencies.length > 0) {
-          // Replace the last part of the weaknesses text with unique competencies
-          const lastSentenceStart = weaknessesText.lastIndexOf("Priority development areas include");
-          if (lastSentenceStart !== -1) {
-            weaknessesText = weaknessesText.substring(0, lastSentenceStart) + 
-              `Priority development areas include ${uniqueImprovementCompetencies.join(', ').replace(/, ([^,]*)$/, ', and $1')}. Focused training in these competencies would significantly enhance professional effectiveness.`;
-          }
-        }
+The candidate completed ${sjtAnalyses.length} of ${submission.history.length} situational judgment scenarios with detailed AI analysis. 
+
+OVERALL PERFORMANCE: ${performanceLevel} (Average Score: ${overallAvgScore.toFixed(1)}/10)
+
+PERFORMANCE DISTRIBUTION:
+- ${strongResponses.length} scenario(s) with strong performance (7+ scores)
+- ${averageResponses.length} scenario(s) with satisfactory performance (5-6.9 scores)  
+- ${improvementAreas.length} scenario(s) requiring development (<5 scores)
+
+COMPETENCY OVERVIEW: 
+${uniqueCompetencies.map(comp => {
+  const competencyScores = sjtAnalyses.filter(a => a.competency === comp.name).map(a => a.score);
+  const competencyAvg = (competencyScores.reduce((a, b) => a + b, 0) / competencyScores.length).toFixed(1);
+  const competencyLevel = competencyScores.every(s => s >= 7) ? 'Strong' : 
+                         competencyScores.every(s => s >= 5) ? 'Developing' : 'Needs Focus';
+  return `- ${comp.name}: ${competencyLevel} (${competencyAvg}/10 across ${competencyScores.length} scenario(s))`;
+}).join('\n')}
+
+OVERALL ASSESSMENT: ${strongResponses.length > improvementAreas.length ? 
+  'The candidate demonstrates solid situational judgment capabilities with particular strengths that outweigh areas for development. With targeted improvement in identified areas, they show strong potential for success.' :
+  improvementAreas.length > strongResponses.length ?
+  'The candidate shows engagement with complex workplace scenarios but would benefit from focused development in key competency areas before advancing. A structured development plan is recommended.' :
+  'The candidate shows balanced performance across assessed competencies with equal strengths and development opportunities. Continued growth and targeted skill enhancement will support their professional advancement.'}`;
 
         analysisResult = {
           strengths: strengthsText,
           weaknesses: weaknessesText,
-          summary: `The candidate completed ${sjtAnalyses.length} of ${submission.history.length} scenarios with AI analysis. The average competency score was ${(sjtAnalyses.reduce((acc, a) => acc + a.score, 0) / (sjtAnalyses.length || 1)).toFixed(1)}/10. ${strongResponses.length > 0 ? `Strong performance in ${uniqueStrongCompetencies.length} competency area(s).` : ''} ${improvementAreas.length > 0 ? `${uniqueImprovementCompetencies.length} competency area(s) identified for development.` : ''}`,
+          summary: summaryText,
           competencyAnalysis: [{
             name: "Situational Competencies",
             competencies: uniqueCompetencies.sort((a,b) => a.name.localeCompare(b.name)),
@@ -218,16 +295,18 @@ export async function POST(request: NextRequest) {
     await submissionService.update(submissionId, {
       report: analysisResult,
       analysisCompleted: true,
-      analysisCompletedAt: new Date()
+      analysisCompletedAt: new Date(),
+      ...(forceRegenerate && { regeneratedAt: new Date() })
     });
     
-    console.log(`✅ Submission ${submissionId} updated with AI analysis`);
+    console.log(`✅ Submission ${submissionId} updated with AI analysis${forceRegenerate ? ' (regenerated)' : ''}`);
     
     return NextResponse.json({ 
       success: true, 
-      message: 'Background analysis completed',
+      message: forceRegenerate ? 'Background analysis regenerated successfully' : 'Background analysis completed',
       submissionId,
-      type: type || 'interview'
+      type: type || 'interview',
+      regenerated: forceRegenerate
     });
     
   } catch (error) {
