@@ -55,7 +55,9 @@ Verbal Insights is ## 📚 Complete Documentation Index
 
 ### 📖 **Feature Documentation**
 - **[📤 Progressive Upload System](./PROGRESSIVE_UPLOAD_EFFICIENCY_PLAN.md)** - Upload optimization and chunking strategy
-- **[👥 User Management](./TEST_USERS_DOCUMENTATION.md)** - User roles and access control
+- **[🎵 Audio Extraction Feature](./AUDIO_EXTRACTION_FEATURE.md)** - Client-side video-to-audio conversion for admin downloads
+- **[�️ Enhanced Deletion System](./ENHANCED_DELETION_SYSTEM.md)** - Cross-storage mode deletion with file cleanup
+- **[�👥 User Management](./TEST_USERS_DOCUMENTATION.md)** - User roles and access control
 - **[👨‍💼 Super Admin Features](./SUPERADMIN_DOCUMENTATION.md)** - Advanced administrative capabilities
 - **[🏗️ Architecture Overview](./docs/ARCHITECTURE.md)** - High-level system overview
 
@@ -120,10 +122,12 @@ NEXT_PUBLIC_FIREBASE_APP_ID="your_app_id"
 - **🧠 AI-Powered Assessment**: Real-time interview analysis with Google Gemini
 - **🎯 Dual Test Types**: JDT (Job Description Test) & SJT (Situational Judgment Test)
 - **🎤 Audio Processing**: Real-time transcription and speech analysis
-- **� Comprehensive Reporting**: Detailed candidate evaluation and scoring
+- **🎵 Audio Extraction**: Client-side video-to-audio conversion for admin downloads
+- **�️ Enhanced Deletion**: Cross-storage mode deletion with complete file cleanup
+- **�📊 Comprehensive Reporting**: Detailed candidate evaluation and scoring
 - **👥 Role-Based Access**: Admin, Super Admin, and Candidate dashboards
 - **📱 Responsive Design**: Mobile-optimized interface
-- **� Real-time Sync**: Cross-device data synchronization
+- **🔄 Real-time Sync**: Cross-device data synchronization
 
 ## � Project Structure
 
