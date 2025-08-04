@@ -389,13 +389,13 @@ export class PartialSubmissionService {
       // Report progress start
       onProgress?.(0, mediaType);
       
-      // 🔒 ENHANCED UPLOAD - Pass candidate name for user-named folders
+      // 🔒 CONSISTENT FOLDER STRUCTURE - Use partials prefix to distinguish from final submissions
       const downloadURL = await mediaStorage.uploadMediaToStorage(
         blob, 
-        sessionId, // Use sessionId instead of temp submission ID
+        `partials_${sessionId}`, // Use partials prefix with sessionId for consistent structure
         questionIndex, 
         mediaType,
-        candidateName // 🔒 NEW PARAMETER - enables user-named folders when available
+        candidateName // Maintained for backward compatibility
       );
       
       // Report progress complete
