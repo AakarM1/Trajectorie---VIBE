@@ -4,7 +4,9 @@
 
 export interface Competency {
   name: string;
-  score: number; // Score out of 10
+  score: number; // Score out of 10 (post-penalty for backward compatibility)
+  prePenaltyScore?: number; // Pre-penalty score for SJT assessments
+  postPenaltyScore?: number; // Post-penalty score for SJT assessments
 }
 
 export interface MetaCompetency {
@@ -25,6 +27,8 @@ export interface ConversationEntry {
   bestResponseRationale?: string;
   worstResponseRationale?: string;
   assessedCompetency?: string;
+  // Follow-up tracking
+  followUpGenerated?: boolean; // Flag to indicate if follow-up questions were generated for this scenario
 }
 
 export type AppStatus = 'INITIAL' | 'ASKING' | 'ANALYZING' | 'RESULTS' | 'ERROR';

@@ -6,7 +6,6 @@
 // Feature flags interface
 export interface FeatureFlags {
   progressiveSave: boolean;
-  sessionRecovery: boolean;
   enhancedProgress: boolean;
   adminLiveTracking: boolean;
 }
@@ -14,7 +13,6 @@ export interface FeatureFlags {
 // Default feature flags (all disabled for safety)
 const DEFAULT_FLAGS: FeatureFlags = {
   progressiveSave: false,      // Progressive per-question saving
-  sessionRecovery: false,      // Session recovery on page load
   enhancedProgress: false,     // Enhanced progress indicators
   adminLiveTracking: false     // Live admin tracking
 };
@@ -37,7 +35,6 @@ export class FeatureFlagService {
     // Check environment variables first
     const envFlags: Partial<FeatureFlags> = {
       progressiveSave: process.env.NEXT_PUBLIC_FEATURE_PROGRESSIVE_SAVE === 'true',
-      sessionRecovery: process.env.NEXT_PUBLIC_FEATURE_SESSION_RECOVERY === 'true',
       enhancedProgress: process.env.NEXT_PUBLIC_FEATURE_ENHANCED_PROGRESS === 'true',
       adminLiveTracking: process.env.NEXT_PUBLIC_FEATURE_ADMIN_LIVE_TRACKING === 'true'
     };
@@ -54,13 +51,6 @@ export class FeatureFlagService {
    */
   isProgressiveSaveEnabled(): boolean {
     return this.flags.progressiveSave;
-  }
-  
-  /**
-   * Check if session recovery is enabled
-   */
-  isSessionRecoveryEnabled(): boolean {
-    return this.flags.sessionRecovery;
   }
   
   /**

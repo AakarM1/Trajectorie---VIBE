@@ -231,24 +231,8 @@ export const ProgressiveProvider = ({ children }: { children: ReactNode }) => {
    * Check for incomplete sessions that can be recovered
    */
   const checkForRecovery = async (): Promise<SessionRecovery | null> => {
-    if (!featureFlags.isSessionRecoveryEnabled() || !user) {
-      return null;
-    }
-    
-    try {
-      console.log('🔍 [Progressive] Checking for recoverable sessions...');
-      const recovery = await partialSubmissionService.checkIncompleteSession(user.id);
-      
-      if (recovery) {
-        console.log('🔄 [Progressive] Found recoverable session:', recovery.sessionId);
-      }
-      
-      return recovery;
-      
-    } catch (error) {
-      console.error('❌ [Progressive] Error checking for recovery:', error);
-      return null;
-    }
+    // Session recovery is disabled
+    return null;
   };
   
   /**

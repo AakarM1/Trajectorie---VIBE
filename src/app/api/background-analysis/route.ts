@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { submissionService, convertFirestoreSubmission } from '@/lib/database';
 import { analyzeConversation } from '@/ai/flows/analyze-conversation';
 import { analyzeSJTResponse, type AnalyzeSJTResponseInput } from '@/ai/flows/analyze-sjt-response';
+import { configurationService } from '@/lib/config-service';
 import type { AnalysisResult } from '@/types';
 
 export async function POST(request: NextRequest) {
@@ -63,7 +64,11 @@ export async function POST(request: NextRequest) {
       
       const submission = convertFirestoreSubmission(fsSubmission);
       
-      console.log(`🤖 Analyzing ${submission.history.length} SJT scenarios...`);
+      // Get SJT configuration for penalty settings
+      const sjtConfig = await configurationService.getSJTConfig();
+      const followUpPenalty = sjtConfig?.settings?.followUpPenalty || 0;
+      
+      console.log(`🤖 Analyzing ${submission.history.length} SJT scenarios with ${followUpPenalty}% follow-up penalty...`);
       const sjtAnalyses: Array<any> = [];
       
       // Process each scenario using admin-defined criteria from the submission
@@ -92,21 +97,41 @@ export async function POST(request: NextRequest) {
           
           const result = await analyzeSJTResponse(sjtAnalysisInput);
           
-          sjtAnalyses.push({ ...result, competency: assessedCompetency });
-          console.log(`✅ Analysis complete for scenario ${i + 1}`);
+          // Calculate penalty if follow-up questions were generated for this scenario
+          // Check both the followUpGenerated flag and if there are multiple entries with the same situation
+          const scenarioEntries = submission.history.filter(h => h.situation === entry.situation);
+          const hasMultipleQuestions = scenarioEntries.length > 1;
+          const hasFollowUp = entry.followUpGenerated || hasMultipleQuestions;
+          
+          if (hasMultipleQuestions) {
+            console.log(`🔍 Scenario ${i + 1}: Found ${scenarioEntries.length} questions for this situation - follow-up penalty will be applied`);
+          }
+          
+          const prePenaltyScore = result.score;
+          const postPenaltyScore = hasFollowUp && followUpPenalty > 0 
+            ? Math.max(0, prePenaltyScore * (1 - followUpPenalty / 100))
+            : prePenaltyScore;
+          
+          sjtAnalyses.push({ 
+            ...result, 
+            competency: assessedCompetency,
+            prePenaltyScore,
+            postPenaltyScore,
+            hasFollowUp,
+            penaltyApplied: hasFollowUp ? followUpPenalty : 0
+          });
+          console.log(`✅ Analysis complete for scenario ${i + 1} (Score: ${prePenaltyScore}${hasFollowUp ? ` → ${postPenaltyScore.toFixed(1)} after ${followUpPenalty}% penalty` : ''})`);
         } catch (analysisError) {
           console.warn(`⚠️ Failed to analyze scenario ${i + 1}:`, analysisError);
         }
       }
       
-      // Create enhanced result if we got analyses
-      if (sjtAnalyses.length > 0) {
-        // Separate high and low performing responses
-        const strongResponses = sjtAnalyses.filter(a => a.score >= 7);
-        const improvementAreas = sjtAnalyses.filter(a => a.score < 7);
-        const averageResponses = sjtAnalyses.filter(a => a.score >= 5 && a.score < 7);
-        
-        // Generate detailed strengths organized by competency - AI driven only
+        // Create enhanced result if we got analyses
+        if (sjtAnalyses.length > 0) {
+          // Separate responses using post-penalty scores for categorization
+          const strongResponses = sjtAnalyses.filter(a => a.postPenaltyScore >= 7);
+          const improvementAreas = sjtAnalyses.filter(a => a.postPenaltyScore < 7);
+          const averageResponses = sjtAnalyses.filter(a => a.postPenaltyScore >= 5 && a.postPenaltyScore < 7);        // Generate detailed strengths organized by competency - AI driven only
         let strengthsText = "";
         
         // Group all responses by competency (including low scores to check for negligible strengths)
@@ -117,37 +142,41 @@ export async function POST(request: NextRequest) {
           }
           const data = allCompetencyResponses.get(response.competency)!;
           data.responses.push(response);
-          data.scores.push(response.score);
+          data.scores.push(response.postPenaltyScore); // Use post-penalty scores for categorization
           data.rationales.push(response.rationale);
         });
         
         // Analyze each competency for strengths
         Array.from(allCompetencyResponses.entries()).forEach(([competency, data]) => {
-          const avgScore = (data.scores.reduce((a, b) => a + b, 0) / data.scores.length).toFixed(1);
-          const hasStrengths = data.responses.some(r => r.score >= 5); // At least some positive performance
+          const avgPrePenaltyScore = (data.responses.reduce((a, b) => a + b.prePenaltyScore, 0) / data.responses.length).toFixed(1);
+          const avgPostPenaltyScore = (data.responses.reduce((a, b) => a + b.postPenaltyScore, 0) / data.responses.length).toFixed(1);
+          const hasStrengths = data.responses.some(r => r.postPenaltyScore >= 5); // At least some positive performance
           
           if (hasStrengths) {
             // Only show competencies where AI found actual strengths
-            const strengthResponses = data.responses.filter(r => r.score >= 5);
+            const strengthResponses = data.responses.filter(r => r.postPenaltyScore >= 5);
             if (strengthResponses.length > 0) {
-              const strengthLevel = data.scores.every(s => s >= 8) ? 'Outstanding Performance' : 
-                                  data.scores.every(s => s >= 7) ? 'Strong Performance' : 
-                                  data.scores.every(s => s >= 5) ? 'Satisfactory Performance' : 
+              const strengthLevel = data.responses.every(r => r.postPenaltyScore >= 8) ? 'Outstanding Performance' : 
+                                  data.responses.every(r => r.postPenaltyScore >= 7) ? 'Strong Performance' : 
+                                  data.responses.every(r => r.postPenaltyScore >= 5) ? 'Satisfactory Performance' : 
                                   'Developing Performance';
               
-              strengthsText += `${competency} (${strengthLevel} - Average: ${avgScore}/10):\n`;
+              strengthsText += `${competency} (${strengthLevel} - Average: ${avgPrePenaltyScore}/10 pre-penalty, ${avgPostPenaltyScore}/10 post-penalty):\n`;
               
               // Individual question analysis for this competency - only questions with scores >= 5
               strengthResponses.forEach(response => {
                 const questionNum = sjtAnalyses.findIndex(a => a === response) + 1;
-                strengthsText += `Question ${questionNum}: ${response.rationale} (Score: ${response.score}/10)\n`;
+                const scoreText = response.hasFollowUp 
+                  ? `Pre-penalty: ${response.prePenaltyScore}/10, Post-penalty: ${response.postPenaltyScore.toFixed(1)}/10 (${response.penaltyApplied}% penalty applied)`
+                  : `Score: ${response.postPenaltyScore}/10`;
+                strengthsText += `Question ${questionNum}: ${response.rationale} (${scoreText})\n`;
               });
               
               strengthsText += `\nDevelopment plan for ${competency}: Continue building on demonstrated capabilities. Focus on consistency and advanced application of skills in this competency area.\n\n`;
             }
           } else {
             // AI found no meaningful strengths for this competency
-            strengthsText += `${competency} (Negligible Strengths - Average: ${avgScore}/10):\n`;
+            strengthsText += `${competency} (Negligible Strengths - Average: ${avgPrePenaltyScore}/10 pre-penalty, ${avgPostPenaltyScore}/10 post-penalty):\n`;
             strengthsText += `This candidate shows negligible strengths for ${competency}.\n\n`;
           }
         });
@@ -174,26 +203,30 @@ export async function POST(request: NextRequest) {
             }
             const data = competencyWeaknesses.get(response.competency)!;
             data.responses.push(response);
-            data.scores.push(response.score);
+            data.scores.push(response.postPenaltyScore); // Use post-penalty scores
             data.rationales.push(response.rationale);
           });
           
           // Analyze each competency needing development
           Array.from(competencyWeaknesses.entries()).forEach(([competency, data]) => {
-            const avgScore = (data.scores.reduce((a, b) => a + b, 0) / data.scores.length).toFixed(1);
-            const developmentLevel = data.scores.every(s => s < 4) ? 'Priority Development Required' : 
-                                   data.scores.every(s => s < 6) ? 'Focused Development Needed' : 
+            const avgPrePenaltyScore = (data.responses.reduce((a, b) => a + b.prePenaltyScore, 0) / data.responses.length).toFixed(1);
+            const avgPostPenaltyScore = (data.responses.reduce((a, b) => a + b.postPenaltyScore, 0) / data.responses.length).toFixed(1);
+            const developmentLevel = data.responses.every(r => r.postPenaltyScore < 4) ? 'Priority Development Required' : 
+                                   data.responses.every(r => r.postPenaltyScore < 6) ? 'Focused Development Needed' : 
                                    'Minor Enhancement Required';
             
-            weaknessesText += `${competency} (${developmentLevel} - Average: ${avgScore}/10):\n`;
+            weaknessesText += `${competency} (${developmentLevel} - Average: ${avgPrePenaltyScore}/10 pre-penalty, ${avgPostPenaltyScore}/10 post-penalty):\n`;
             
             // Individual question analysis for this competency
             data.responses.forEach(response => {
               const questionNum = sjtAnalyses.findIndex(a => a === response) + 1;
-              weaknessesText += `Question ${questionNum}: ${response.rationale} (Score: ${response.score}/10)\n`;
+              const scoreText = response.hasFollowUp 
+                ? `Pre-penalty: ${response.prePenaltyScore}/10, Post-penalty: ${response.postPenaltyScore.toFixed(1)}/10 (${response.penaltyApplied}% penalty applied)`
+                : `Score: ${response.postPenaltyScore}/10`;
+              weaknessesText += `Question ${questionNum}: ${response.rationale} (${scoreText})\n`;
             });
             
-            weaknessesText += `\nDevelopment plan for ${competency}: ${data.scores.every(s => s < 4) ? 'Immediate and intensive development required through structured training, mentoring, and supervised practice.' : data.scores.every(s => s < 6) ? 'Focused development through targeted training programs and practical application opportunities.' : 'Minor improvements through skill refinement and additional practice scenarios.'}\n\n`;
+            weaknessesText += `\nDevelopment plan for ${competency}: ${data.responses.every(r => r.postPenaltyScore < 4) ? 'Immediate and intensive development required through structured training, mentoring, and supervised practice.' : data.responses.every(r => r.postPenaltyScore < 6) ? 'Focused development through targeted training programs and practical application opportunities.' : 'Minor improvements through skill refinement and additional practice scenarios.'}\n\n`;
           });
           
           weaknessesText += "ADDITIONAL WEAKNESSES:\n\n";
@@ -205,24 +238,27 @@ export async function POST(request: NextRequest) {
           weaknessesText += "No significant development areas identified through AI analysis.\n\n";
         }
 
-        // Process analyses to combine scores for the same competency
-        const competencyMap = new Map<string, { totalScore: number, count: number }>();
+        // Process analyses to combine scores for the same competency using post-penalty scores
+        const competencyMap = new Map<string, { totalPrePenaltyScore: number, totalPostPenaltyScore: number, count: number }>();
         
         sjtAnalyses.forEach((analysis) => {
           const competencyName = analysis.competency;
           if (!competencyMap.has(competencyName)) {
-            competencyMap.set(competencyName, { totalScore: 0, count: 0 });
+            competencyMap.set(competencyName, { totalPrePenaltyScore: 0, totalPostPenaltyScore: 0, count: 0 });
           }
           
           const record = competencyMap.get(competencyName)!;
-          record.totalScore += analysis.score;
+          record.totalPrePenaltyScore += analysis.prePenaltyScore;
+          record.totalPostPenaltyScore += analysis.postPenaltyScore;
           record.count += 1;
         });
         
         // Convert map to array of unique competencies with averaged scores
         const uniqueCompetencies = Array.from(competencyMap.entries()).map(([name, data]) => ({
           name,
-          score: Math.round((data.totalScore / data.count) * 10) / 10 // Round to 1 decimal place
+          score: Math.round((data.totalPostPenaltyScore / data.count) * 10) / 10, // Use post-penalty as main score
+          prePenaltyScore: Math.round((data.totalPrePenaltyScore / data.count) * 10) / 10,
+          postPenaltyScore: Math.round((data.totalPostPenaltyScore / data.count) * 10) / 10
         }));
 
         // Get unique competency names for the summary text
@@ -230,30 +266,38 @@ export async function POST(request: NextRequest) {
         const uniqueImprovementCompetencies = [...new Set(improvementAreas.map(r => r.competency))];
 
         // Enhanced comprehensive summary
-        const overallAvgScore = (sjtAnalyses.reduce((acc, a) => acc + a.score, 0) / (sjtAnalyses.length || 1));
-        const performanceLevel = overallAvgScore >= 8 ? 'Excellent' : 
-                               overallAvgScore >= 7 ? 'Very Good' : 
-                               overallAvgScore >= 6 ? 'Good' : 
-                               overallAvgScore >= 5 ? 'Satisfactory' : 'Needs Improvement';
+        const overallAvgPrePenaltyScore = (sjtAnalyses.reduce((acc, a) => acc + a.prePenaltyScore, 0) / (sjtAnalyses.length || 1));
+        const overallAvgPostPenaltyScore = (sjtAnalyses.reduce((acc, a) => acc + a.postPenaltyScore, 0) / (sjtAnalyses.length || 1));
+        const scenariosWithPenalty = sjtAnalyses.filter(a => a.hasFollowUp).length;
+        
+        const performanceLevel = overallAvgPostPenaltyScore >= 8 ? 'Excellent' : 
+                               overallAvgPostPenaltyScore >= 7 ? 'Very Good' : 
+                               overallAvgPostPenaltyScore >= 6 ? 'Good' : 
+                               overallAvgPostPenaltyScore >= 5 ? 'Satisfactory' : 'Needs Improvement';
         
         const summaryText = `COMPREHENSIVE ASSESSMENT SUMMARY:
 
 The candidate completed ${sjtAnalyses.length} of ${submission.history.length} situational judgment scenarios with detailed AI analysis. 
 
-OVERALL PERFORMANCE: ${performanceLevel} (Average Score: ${overallAvgScore.toFixed(1)}/10)
+OVERALL PERFORMANCE: ${performanceLevel}
+- Pre-penalty Average: ${overallAvgPrePenaltyScore.toFixed(1)}/10
+- Post-penalty Average: ${overallAvgPostPenaltyScore.toFixed(1)}/10
+${scenariosWithPenalty > 0 ? `- Follow-up Penalties Applied: ${scenariosWithPenalty} scenario(s) with ${followUpPenalty}% penalty` : '- No Follow-up Penalties Applied'}
 
-PERFORMANCE DISTRIBUTION:
+PERFORMANCE DISTRIBUTION (Post-Penalty):
 - ${strongResponses.length} scenario(s) with strong performance (7+ scores)
 - ${averageResponses.length} scenario(s) with satisfactory performance (5-6.9 scores)  
 - ${improvementAreas.length} scenario(s) requiring development (<5 scores)
 
 COMPETENCY OVERVIEW: 
 ${uniqueCompetencies.map(comp => {
-  const competencyScores = sjtAnalyses.filter(a => a.competency === comp.name).map(a => a.score);
-  const competencyAvg = (competencyScores.reduce((a, b) => a + b, 0) / competencyScores.length).toFixed(1);
-  const competencyLevel = competencyScores.every(s => s >= 7) ? 'Strong' : 
-                         competencyScores.every(s => s >= 5) ? 'Developing' : 'Needs Focus';
-  return `- ${comp.name}: ${competencyLevel} (${competencyAvg}/10 across ${competencyScores.length} scenario(s))`;
+  const competencyScores = sjtAnalyses.filter(a => a.competency === comp.name);
+  const competencyPreAvg = (competencyScores.reduce((a, b) => a + b.prePenaltyScore, 0) / competencyScores.length).toFixed(1);
+  const competencyPostAvg = (competencyScores.reduce((a, b) => a + b.postPenaltyScore, 0) / competencyScores.length).toFixed(1);
+  const competencyLevel = competencyScores.every(s => s.postPenaltyScore >= 7) ? 'Strong' : 
+                         competencyScores.every(s => s.postPenaltyScore >= 5) ? 'Developing' : 'Needs Focus';
+  const penaltiesInCompetency = competencyScores.filter(s => s.hasFollowUp).length;
+  return `- ${comp.name}: ${competencyLevel} (Pre: ${competencyPreAvg}/10, Post: ${competencyPostAvg}/10 across ${competencyScores.length} scenario(s)${penaltiesInCompetency > 0 ? `, ${penaltiesInCompetency} with penalties` : ''})`;
 }).join('\n')}
 
 OVERALL ASSESSMENT: ${strongResponses.length > improvementAreas.length ? 

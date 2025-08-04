@@ -18,11 +18,8 @@ import { Button } from '@/components/ui/button';
 import { configurationService } from '@/lib/config-service';
 // 🔒 MINIMAL IMPACT IMPORTS - Progressive upload support for SJT
 import { ProgressiveProvider, useProgressive } from '@/contexts/progressive-context';
-// Note: SessionRecoveryModal is imported but will be used in a separate PR
-// import { SessionRecoveryModal } from '@/components/session-recovery-modal';
-import { ProgressiveUploadIndicator } from '@/components/progressive-upload-indicator';
 import { featureFlags } from '@/lib/feature-flags';
-import type { SessionRecovery, ProgressInfo, SaveResult } from '@/types/partial-submission';
+import type { ProgressInfo, SaveResult } from '@/types/partial-submission';
 
 
 interface Scenario {
@@ -510,6 +507,10 @@ function SJTInterviewPage() {
         // Update conversation history with new follow-up
         const newHistory = [...updatedHistory];
         newHistory.splice(currentQuestionIndex + 1, 0, newConversationEntry);
+        
+        // Mark the current question as having generated a follow-up for penalty calculation
+        newHistory[currentQuestionIndex].followUpGenerated = true;
+        
         setConversationHistory(newHistory);
         
         // Update follow-up count for this base question
@@ -523,9 +524,12 @@ function SJTInterviewPage() {
         newQuestionTimes.splice(currentQuestionIndex + 1, 0, 0);
         setQuestionTimes(newQuestionTimes);
         
+        // Log AI rationale to console for debugging (not shown to user)
+        console.log("Follow-up Question Generated - AI Rationale:", evaluation.rationale);
+        
         toast({
           title: "Follow-up Question Generated",
-          description: evaluation.rationale,
+          description: "Based on your response, we have a follow-up question to explore further.",
           duration: 5000, // 5 seconds duration
           className: "bg-green-50 border border-green-200 text-green-800", 
         });
@@ -535,9 +539,12 @@ function SJTInterviewPage() {
         setCurrentQuestionIndex(currentQuestionIndex + 1);
         return; // Exit early to avoid the automatic navigation in finally block
       } else {
+        // Log AI rationale to console for debugging (not shown to user)
+        console.log("Answer Complete - AI Rationale:", evaluation.rationale);
+        
         toast({
           title: "Answer Complete",
-          description: evaluation.rationale,
+          description: "Your response has been recorded. Moving to the next question.",
           duration: 5000, // 5 seconds duration
           className: "bg-green-50 border border-green-200 text-green-800",
         });
@@ -554,112 +561,6 @@ function SJTInterviewPage() {
     }
   };
   
-  // 🔒 MINIMAL IMPACT - Session recovery on startup
-  useEffect(() => {
-    const checkForRecoverableSession = async () => {
-      if (!progressive.isProgressiveSaveEnabled || !user) {
-        return;
-      }
-      
-      try {
-        console.log('🔍 Checking for recoverable SJT session...');
-        const recovery = await progressive.checkForRecovery();
-        
-        if (recovery && recovery.interviewType === 'SJT' && recovery.canResume) {
-          console.log('🔄 Found recoverable SJT session:', recovery);
-          
-          // Set pre-interview details from recovery
-          setPreInterviewDetails({
-            name: recovery.candidateName,
-            roleCategory: "Situational Judgement Test",
-            language: 'English'
-          });
-          
-          // Show session recovery modal with confirmation option
-          // Currently importing the SessionRecoveryModal component and using it here
-          // Note: Actual implementation depends on how session recovery UI is designed
-          
-          // For now, we'll implement a basic toast notification
-          toast({
-            title: "Session Recovery Available",
-            description: "You have a previous session that was interrupted. Would you like to continue?",
-            duration: 10000, // Long duration
-            action: (
-              <div className="flex gap-2">
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => {
-                    // Resume session
-                    progressive.resumeSession(recovery.sessionId);
-                    
-                    // Reconstruct conversation history from partial submissions
-                    const restoredHistory: ConversationEntry[] = new Array(recovery.totalQuestions).fill(null).map(() => ({
-                      question: '',
-                      answer: null,
-                      preferredAnswer: undefined, // 🔒 EXPLICIT undefined for SJT
-                      competency: undefined, // 🔒 EXPLICIT undefined for SJT
-                    }));
-                    
-                    // Fill in recovered answers
-                    recovery.partialSubmissions.forEach(partial => {
-                      const entry: ConversationEntry = {
-                        question: partial.question || '',
-                        answer: null, // Initialize with null as required by type
-                        preferredAnswer: undefined, // 🔒 EXPLICIT undefined for SJT
-                        competency: undefined, // 🔒 EXPLICIT undefined for SJT
-                      };
-                      
-                      // Add optional fields only if they exist
-                      if (partial.answer) entry.answer = partial.answer;
-                      if (partial.videoDataUri) entry.videoDataUri = partial.videoDataUri;
-                      if (partial.situation) entry.situation = partial.situation;
-                      if (partial.bestResponseRationale) entry.bestResponseRationale = partial.bestResponseRationale;
-                      if (partial.worstResponseRationale) entry.worstResponseRationale = partial.worstResponseRationale;
-                      if (partial.assessedCompetency) entry.assessedCompetency = partial.assessedCompetency;
-                      
-                      // Add to history
-                      restoredHistory[partial.questionIndex] = entry;
-                    });
-                    
-                    setConversationHistory(restoredHistory);
-                    setCurrentQuestionIndex(recovery.lastQuestionIndex + 1);
-                    setStatus('INTERVIEW');
-                    
-                    toast({
-                      title: "Session Resumed",
-                      description: `Restored ${recovery.completedQuestions} previous answers.`,
-                    });
-                  }}
-                >
-                  Resume
-                </Button>
-                <Button 
-                  variant="destructive" 
-                  size="sm"
-                  onClick={() => {
-                    // Discard and start new session
-                    progressive.startNewSession('SJT');
-                    toast({
-                      title: "New Session Started",
-                      description: "Previous session has been discarded.",
-                    });
-                  }}
-                >
-                  Start New
-                </Button>
-              </div>
-            ),
-          });
-        }
-      } catch (error) {
-        console.error('❌ Error checking for recoverable session:', error);
-      }
-    };
-    
-    checkForRecoverableSession();
-  }, [progressive, user, toast]);
-
   useEffect(() => {
     if (user && !preInterviewDetails) {
         setPreInterviewDetails({ name: user.candidateName, roleCategory: "Situational Judgement Test", language: 'English' });
@@ -696,55 +597,6 @@ function SJTInterviewPage() {
            );
         }
         
-        // 🔒 MINIMAL IMPACT - Show upload indicator if uploads are in progress
-        if (progressive.isProgressiveUploadEnabled && hasActiveUpload()) {
-          // Get upload progress summary
-          let totalProgress = 0;
-          let count = 0;
-          progressive.uploadProgress.forEach((value) => {
-            totalProgress += value.progress;
-            count++;
-          });
-          const averageProgress = count > 0 ? Math.round(totalProgress / count) : 0;
-          
-          // Display an upload indicator
-          return (
-            <div className="w-full max-w-6xl flex flex-col items-center">
-              <div className="w-full rounded-md bg-blue-50 p-4 mb-4 flex items-center justify-between border border-blue-200">
-                <div className="flex items-center">
-                  <svg className="animate-pulse mr-2 h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  <span className="font-medium text-blue-700">Uploading media... ({averageProgress}%)</span>
-                </div>
-                <div className="w-1/3 bg-blue-200 rounded-full h-2">
-                  <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${averageProgress}%` }}></div>
-                </div>
-              </div>
-              
-              <Flashcard
-                key={currentQuestionIndex}
-                question={currentEntry.question}
-                questionNumber={currentQuestionIndex + 1}
-                totalQuestions={conversationHistory.length}
-                onAnswerSubmit={handleAnswerSubmit}
-                isProcessing={isSavingAnswer}
-                isVisible={true}
-                mode={interviewMode}
-                isAnswered={currentEntry.answer !== null}
-                onFinishInterview={handleFinishInterview}
-                answeredQuestionsCount={answeredQuestionsCount}
-                timeLimitInMinutes={timeLimit}
-                onTimeUp={handleFinishInterview}
-                currentQuestionIndex={currentQuestionIndex}
-                setCurrentQuestionIndex={setCurrentQuestionIndex}
-                conversationHistory={conversationHistory}
-                questionTimes={questionTimes}
-                setQuestionTimes={setQuestionTimes}
-              />
-            </div>
-          );
-        }
         return (
           <div className="w-full max-w-6xl flex flex-col items-center">
             <Flashcard
@@ -824,8 +676,6 @@ function SJTInterviewPage() {
   return (
     <div className="flex flex-col min-h-screen">
       <Header />
-      {/* 🔒 MINIMAL IMPACT - Add progressive upload indicator */}
-      {progressive.isProgressiveUploadEnabled && <ProgressiveUploadIndicator />}
       <main className="flex-grow flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8">
         {checkingAttempts ? (
           <div className="flex flex-col items-center justify-center text-center p-8">
