@@ -82,45 +82,61 @@ export async function POST(request: NextRequest) {
         }
         
         // Extract assessedCompetency from the entry - prefer specific admin-defined competency field
-        const assessedCompetency = entry.assessedCompetency || entry.competency || `Situational Judgment ${i+1}`;
+        const assessedCompetencyRaw = entry.assessedCompetency || entry.competency || `Situational Judgment ${i+1}`;
+        
+        // Parse multiple competencies separated by commas
+        const assessedCompetencies = assessedCompetencyRaw
+          .split(',')
+          .map(comp => comp.trim())
+          .filter(comp => comp.length > 0);
+        
+        // If no valid competencies found, use default
+        const competenciesToAnalyze = assessedCompetencies.length > 0 ? assessedCompetencies : [`Situational Judgment ${i+1}`];
+        
+        console.log(`📊 Question ${i + 1} will be analyzed for competencies: ${competenciesToAnalyze.join(', ')}`);
         
         try {
-          // Create analysis input with all available data from entry
-          const sjtAnalysisInput: AnalyzeSJTResponseInput = {
-            situation: entry.situation || entry.question || "No situation provided",
-            question: entry.question || "No question provided", 
-            bestResponseRationale: entry.bestResponseRationale || "No best response criteria provided",
-            worstResponseRationale: entry.worstResponseRationale || "No worst response criteria provided",
-            assessedCompetency: assessedCompetency,
-            candidateAnswer: entry.answer,
-          };
-          
-          const result = await analyzeSJTResponse(sjtAnalysisInput);
-          
-          // Calculate penalty if follow-up questions were generated for this scenario
-          // Check both the followUpGenerated flag and if there are multiple entries with the same situation
-          const scenarioEntries = submission.history.filter(h => h.situation === entry.situation);
-          const hasMultipleQuestions = scenarioEntries.length > 1;
-          const hasFollowUp = entry.followUpGenerated || hasMultipleQuestions;
-          
-          if (hasMultipleQuestions) {
-            console.log(`🔍 Scenario ${i + 1}: Found ${scenarioEntries.length} questions for this situation - follow-up penalty will be applied`);
+          // Create analysis for each competency
+          for (const competency of competenciesToAnalyze) {
+            // Create analysis input with all available data from entry
+            const sjtAnalysisInput: AnalyzeSJTResponseInput = {
+              situation: entry.situation || entry.question || "No situation provided",
+              question: entry.question || "No question provided", 
+              bestResponseRationale: entry.bestResponseRationale || "No best response criteria provided",
+              worstResponseRationale: entry.worstResponseRationale || "No worst response criteria provided",
+              assessedCompetency: competency,
+              candidateAnswer: entry.answer,
+            };
+            
+            const result = await analyzeSJTResponse(sjtAnalysisInput);
+            
+            // Calculate penalty if follow-up questions were generated for this scenario
+            // Check both the followUpGenerated flag and if there are multiple entries with the same situation
+            const scenarioEntries = submission.history.filter(h => h.situation === entry.situation);
+            const hasMultipleQuestions = scenarioEntries.length > 1;
+            const hasFollowUp = entry.followUpGenerated || hasMultipleQuestions;
+            
+            if (hasMultipleQuestions) {
+              console.log(`🔍 Scenario ${i + 1}: Found ${scenarioEntries.length} questions for this situation - follow-up penalty will be applied`);
+            }
+            
+            const prePenaltyScore = result.score;
+            const postPenaltyScore = hasFollowUp && followUpPenalty > 0 
+              ? Math.max(0, prePenaltyScore * (1 - followUpPenalty / 100))
+              : prePenaltyScore;
+            
+            sjtAnalyses.push({ 
+              ...result, 
+              competency: competency,
+              prePenaltyScore,
+              postPenaltyScore,
+              hasFollowUp,
+              penaltyApplied: hasFollowUp ? followUpPenalty : 0,
+              questionNumber: i + 1, // Add question number for better reporting
+              originalCompetencies: assessedCompetencies // Keep track of all competencies for this question
+            });
+            console.log(`✅ Analysis complete for scenario ${i + 1}, competency "${competency}" (Score: ${prePenaltyScore}${hasFollowUp ? ` → ${postPenaltyScore.toFixed(1)} after ${followUpPenalty}% penalty` : ''})`);
           }
-          
-          const prePenaltyScore = result.score;
-          const postPenaltyScore = hasFollowUp && followUpPenalty > 0 
-            ? Math.max(0, prePenaltyScore * (1 - followUpPenalty / 100))
-            : prePenaltyScore;
-          
-          sjtAnalyses.push({ 
-            ...result, 
-            competency: assessedCompetency,
-            prePenaltyScore,
-            postPenaltyScore,
-            hasFollowUp,
-            penaltyApplied: hasFollowUp ? followUpPenalty : 0
-          });
-          console.log(`✅ Analysis complete for scenario ${i + 1} (Score: ${prePenaltyScore}${hasFollowUp ? ` → ${postPenaltyScore.toFixed(1)} after ${followUpPenalty}% penalty` : ''})`);
         } catch (analysisError) {
           console.warn(`⚠️ Failed to analyze scenario ${i + 1}:`, analysisError);
         }
@@ -152,6 +168,10 @@ export async function POST(request: NextRequest) {
           const avgPostPenaltyScore = (data.responses.reduce((a, b) => a + b.postPenaltyScore, 0) / data.responses.length).toFixed(1);
           const hasStrengths = data.responses.some(r => r.postPenaltyScore >= 5); // At least some positive performance
           
+          // Get unique question numbers for this competency
+          const questionNumbers = [...new Set(data.responses.map(r => r.questionNumber))].sort((a, b) => a - b);
+          console.log(`📊 Competency "${competency}" analyzed from questions: ${questionNumbers.join(', ')}`);
+          
           if (hasStrengths) {
             // Only show competencies where AI found actual strengths
             const strengthResponses = data.responses.filter(r => r.postPenaltyScore >= 5);
@@ -164,12 +184,27 @@ export async function POST(request: NextRequest) {
               strengthsText += `${competency} (${strengthLevel} - Average: ${avgPrePenaltyScore}/10 pre-penalty, ${avgPostPenaltyScore}/10 post-penalty):\n`;
               
               // Individual question analysis for this competency - only questions with scores >= 5
+              // Group by question number to show which specific questions contributed to this competency
+              const questionGroups = new Map<number, any[]>();
               strengthResponses.forEach(response => {
-                const questionNum = sjtAnalyses.findIndex(a => a === response) + 1;
-                const scoreText = response.hasFollowUp 
-                  ? `Pre-penalty: ${response.prePenaltyScore}/10, Post-penalty: ${response.postPenaltyScore.toFixed(1)}/10 (${response.penaltyApplied}% penalty applied)`
-                  : `Score: ${response.postPenaltyScore}/10`;
-                strengthsText += `Question ${questionNum}: ${response.rationale} (${scoreText})\n`;
+                const questionNum = response.questionNumber || 1;
+                if (!questionGroups.has(questionNum)) {
+                  questionGroups.set(questionNum, []);
+                }
+                questionGroups.get(questionNum)!.push(response);
+              });
+              
+              // Display analysis grouped by question number
+              Array.from(questionGroups.entries()).sort((a, b) => a[0] - b[0]).forEach(([questionNum, responses]) => {
+                // If there are multiple competency analyses for the same question, show the best one
+                const bestResponse = responses.reduce((best, current) => 
+                  current.postPenaltyScore > best.postPenaltyScore ? current : best
+                );
+                
+                const scoreText = bestResponse.hasFollowUp 
+                  ? `Pre-penalty: ${bestResponse.prePenaltyScore}/10, Post-penalty: ${bestResponse.postPenaltyScore.toFixed(1)}/10 (${bestResponse.penaltyApplied}% penalty applied)`
+                  : `Score: ${bestResponse.postPenaltyScore}/10`;
+                strengthsText += `Question ${questionNum}: ${bestResponse.rationale} (${scoreText})\n`;
               });
               
               strengthsText += `\nDevelopment plan for ${competency}: Continue building on demonstrated capabilities. Focus on consistency and advanced application of skills in this competency area.\n\n`;
@@ -217,13 +252,27 @@ export async function POST(request: NextRequest) {
             
             weaknessesText += `${competency} (${developmentLevel} - Average: ${avgPrePenaltyScore}/10 pre-penalty, ${avgPostPenaltyScore}/10 post-penalty):\n`;
             
-            // Individual question analysis for this competency
+            // Individual question analysis for this competency - group by question number
+            const questionGroups = new Map<number, any[]>();
             data.responses.forEach(response => {
-              const questionNum = sjtAnalyses.findIndex(a => a === response) + 1;
-              const scoreText = response.hasFollowUp 
-                ? `Pre-penalty: ${response.prePenaltyScore}/10, Post-penalty: ${response.postPenaltyScore.toFixed(1)}/10 (${response.penaltyApplied}% penalty applied)`
-                : `Score: ${response.postPenaltyScore}/10`;
-              weaknessesText += `Question ${questionNum}: ${response.rationale} (${scoreText})\n`;
+              const questionNum = response.questionNumber || 1;
+              if (!questionGroups.has(questionNum)) {
+                questionGroups.set(questionNum, []);
+              }
+              questionGroups.get(questionNum)!.push(response);
+            });
+            
+            // Display analysis grouped by question number
+            Array.from(questionGroups.entries()).sort((a, b) => a[0] - b[0]).forEach(([questionNum, responses]) => {
+              // If there are multiple competency analyses for the same question, show the one that needs most development
+              const worstResponse = responses.reduce((worst, current) => 
+                current.postPenaltyScore < worst.postPenaltyScore ? current : worst
+              );
+              
+              const scoreText = worstResponse.hasFollowUp 
+                ? `Pre-penalty: ${worstResponse.prePenaltyScore}/10, Post-penalty: ${worstResponse.postPenaltyScore.toFixed(1)}/10 (${worstResponse.penaltyApplied}% penalty applied)`
+                : `Score: ${worstResponse.postPenaltyScore}/10`;
+              weaknessesText += `Question ${questionNum}: ${worstResponse.rationale} (${scoreText})\n`;
             });
             
             weaknessesText += `\nDevelopment plan for ${competency}: ${data.responses.every(r => r.postPenaltyScore < 4) ? 'Immediate and intensive development required through structured training, mentoring, and supervised practice.' : data.responses.every(r => r.postPenaltyScore < 6) ? 'Focused development through targeted training programs and practical application opportunities.' : 'Minor improvements through skill refinement and additional practice scenarios.'}\n\n`;

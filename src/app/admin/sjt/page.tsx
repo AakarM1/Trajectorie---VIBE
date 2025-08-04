@@ -189,7 +189,7 @@ const SJTConfigPage = () => {
                 <CardHeader>
                     <CardTitle>SJT Scenarios</CardTitle>
                     <CardDescription>
-                    Define the situations, questions, and rationale for best/worst responses to guide AI analysis. The number of scenarios you create here will be the number of questions in the test.
+                    Define the situations, questions, and rationale for best/worst responses to guide AI analysis. Each scenario can assess multiple competencies by listing them separated by commas. The number of scenarios you create here will be the number of questions in the test.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
@@ -215,9 +215,18 @@ const SJTConfigPage = () => {
                             </div>
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor={`competency-${scenario.id}`}>Primary Competency Assessed</Label>
-                            <Input id={`competency-${scenario.id}`} placeholder="e.g., Customer Focus" value={scenario.assessedCompetency} onChange={(e) => handleScenarioChange(scenario.id, 'assessedCompetency', e.target.value)} required />
-                            </div>
+                            <Label htmlFor={`competency-${scenario.id}`}>Competencies Assessed</Label>
+                            <Input 
+                                id={`competency-${scenario.id}`} 
+                                placeholder="e.g., Customer Focus, Problem Solving, Communication" 
+                                value={scenario.assessedCompetency} 
+                                onChange={(e) => handleScenarioChange(scenario.id, 'assessedCompetency', e.target.value)} 
+                                required 
+                            />
+                            <p className="text-sm text-muted-foreground">
+                                Enter multiple competencies separated by commas. Each competency will be analyzed separately in the report.
+                            </p>
+                        </div>
                         {scenarios.length > 1 && (
                         <Button variant="ghost" size="icon" onClick={() => removeScenario(scenario.id)} type="button" className="absolute top-2 right-2">
                             <Trash2 className="h-5 w-5 text-destructive" />

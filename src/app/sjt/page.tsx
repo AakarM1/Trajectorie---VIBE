@@ -39,7 +39,7 @@ const fallbackSjtScenarios: Scenario[] = [
     question: "What is your immediate plan of action to handle this situation?",
     bestResponseRationale: "Acknowledge the customer's frustration with empathy, take full ownership of the problem without making excuses, and immediately propose a concrete solution such as expediting the next shipment for free. The focus should be on solving the customer's problem first and rebuilding trust.",
     worstResponseRationale: "Become defensive, blame the logistics team or external factors, or make promises that cannot be kept. A poor response would fail to acknowledge the customer's importance and the severity of the issue.",
-    assessedCompetency: "Customer Focus",
+    assessedCompetency: "Customer Focus, Problem Solving, Communication",
   },
   {
     id: 2,
@@ -47,7 +47,7 @@ const fallbackSjtScenarios: Scenario[] = [
     question: "How would you approach this situation with your team member?",
     bestResponseRationale: "Schedule a private, one-on-one meeting to express concern and create a safe space for them to share any challenges. The ideal approach is to listen actively, ask open-ended questions to understand the root cause (be it workload, personal issues, or skill gaps), and collaboratively develop a support plan.",
     worstResponseRationale: "Criticize the team member publicly, immediately put them on a performance improvement plan without discussion, or simply ignore the problem hoping it will resolve itself. A bad response lacks empathy and fails to investigate the underlying issues.",
-    assessedCompetency: "Coaching & Mentoring",
+    assessedCompetency: "Coaching & Mentoring, Leadership, Emotional Intelligence",
   },
 ];
 
