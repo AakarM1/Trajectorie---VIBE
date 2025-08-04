@@ -5,12 +5,12 @@ import { getAuth, connectAuthEmulator } from 'firebase/auth';
 // Firebase configuration
 // These should be set as environment variables in production
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyDdNbACt-eseLyvXluj1uKuBQ7zWK47t-o",
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "trajectorie-vibe.firebaseapp.com",
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "trajectorie-vibe",
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "trajectorie-vibe.appspot.com",
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "123456789",
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:123456789:web:trajectorie-vibe"
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyDN7C4sqES4HdNzue82-OOsuzP6GbKEQ-A",
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "trajectorie-vibe-8366c.firebaseapp.com",
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "trajectorie-vibe-8366c",
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "trajectorie-vibe-8366c.firebasestorage.app",
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "617194852227",
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:617194852227:web:09eae4b037b5831eb170b6"
 };
 
 // Initialize Firebase

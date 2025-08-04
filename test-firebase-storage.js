@@ -5,7 +5,7 @@ const { getStorage, ref, uploadBytes, getDownloadURL, connectStorageEmulator } =
 // Use the same config as your app (from .env file)
 const firebaseConfig = {
   apiKey: "AIzaSyDN7C4sqES4HdNzue82-OOsuzP6GbKEQ-A",
-  authDomain: "trajectorie-vibe-7d9c3.firebaseapp.com",
+  authDomain: "trajectorie-vibe-8366c.firebaseapp.com",
   projectId: "trajectorie-vibe-8366c",
   storageBucket: "trajectorie-vibe-8366c.firebasestorage.app",
   messagingSenderId: "617194852227",
