@@ -23,6 +23,7 @@ The Verbal Insights platform is a comprehensive AI-powered interview assessment 
 - 📊 **Comprehensive Reporting** with detailed candidate evaluation
 - 👥 **Role-Based Access Control** (Admin, Super Admin, Candidate)
 - 🌐 **CORS-Proof Media Handling** with 5-layer download strategy
+- 🎵 **Audio Extraction** from videos using client-side FFmpeg.js processing
 - 📱 **Responsive Design** optimized for all devices
 - 🔄 **Real-time Synchronization** across multiple devices
 
@@ -38,6 +39,7 @@ The Verbal Insights platform is a comprehensive AI-powered interview assessment 
 - Styling: Tailwind CSS 3.x
 - State Management: React Context + Custom Hooks
 - Form Handling: React Hook Form + Zod validation
+- Media Processing: FFmpeg.js for client-side audio extraction
 ```
 
 ### Backend Services
@@ -195,6 +197,7 @@ graph TD
 │   ├── 🔥 firebase.ts                  # Firebase configuration
 │   ├── 📊 database.ts                  # Database operations
 │   ├── 📤 media-storage.ts             # Storage operations
+│   ├── 🎵 audio-extractor.ts           # FFmpeg.js audio extraction utility
 │   ├── 📈 upload-progress-calculator.ts # Progress calculations
 │   ├── ⚠️ upload-error-handler.ts      # Error management
 │   └── 🧮 utils.ts                     # General utilities
