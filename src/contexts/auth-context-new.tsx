@@ -10,6 +10,13 @@ import {
   convertFirestoreSubmission,
   type FirestoreUser 
 } from '@/lib/database';
+import { getStorageConfig } from '@/lib/storage-config';
+
+// 🔒 CRITICAL FIX: Add missing isFirestoreAvailable function
+const isFirestoreAvailable = (): boolean => {
+  const config = getStorageConfig();
+  return config.useFirestore;
+};
 
 // Define the user type
 interface User {

@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { FileCog, PlusCircle, Trash2, ArrowLeft, Settings, Clock, ListOrdered } from 'lucide-react';
+import { FileCog, PlusCircle, Trash2, ArrowLeft, Settings, Clock, ListOrdered, BrainCircuit, TrendingDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
 import Header from '@/components/header';
@@ -28,13 +28,15 @@ interface Scenario {
 interface TestSettings {
   timeLimit: number; // in minutes, 0 for no limit
   numberOfQuestions: number;
+  aiGeneratedQuestions: number; // Number of AI-generated follow-up questions
+  followUpPenalty: number; // Percentage penalty for follow-up questions (0-100)
 }
 
 
 const SJTConfigPage = () => {
   const { toast } = useToast();
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
-  const [settings, setSettings] = useState<TestSettings>({ timeLimit: 0, numberOfQuestions: 5 });
+  const [settings, setSettings] = useState<TestSettings>({ timeLimit: 0, numberOfQuestions: 5, aiGeneratedQuestions: 0, followUpPenalty: 0 });
 
 
   useEffect(() => {
@@ -53,6 +55,8 @@ const SJTConfigPage = () => {
              setSettings({
                 timeLimit: savedSettings.timeLimit || 0,
                 numberOfQuestions: savedSettings.numberOfQuestions || 5,
+                aiGeneratedQuestions: savedSettings.aiGeneratedQuestions || 0,
+                followUpPenalty: savedSettings.followUpPenalty || 0,
              });
           }
         } else {
@@ -131,7 +135,7 @@ const SJTConfigPage = () => {
                     <CardHeader>
                         <CardTitle className="flex items-center gap-2"><Settings />Test Settings</CardTitle>
                     </CardHeader>
-                    <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                         <div className="space-y-2">
                             <Label htmlFor="time-limit" className="flex items-center gap-2"><Clock /> Time Limit (minutes)</Label>
                             <Input
@@ -154,6 +158,30 @@ const SJTConfigPage = () => {
                             />
                             <p className="text-xs text-muted-foreground">Set to 0 to use all created scenarios.</p>
                         </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="ai-questions-number" className="flex items-center gap-2"><BrainCircuit /> AI Follow-Up Questions</Label>
+                            <Input
+                                id="ai-questions-number"
+                                type="number"
+                                value={settings.aiGeneratedQuestions}
+                                onChange={(e) => setSettings(s => ({ ...s, aiGeneratedQuestions: parseInt(e.target.value, 10) || 0 }))}
+                                placeholder="e.g., 2"
+                            />
+                            <p className="text-xs text-muted-foreground">Number of AI-generated follow-up questions per scenario.</p>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="follow-up-penalty" className="flex items-center gap-2"><TrendingDown /> Follow Up Penalty (%)</Label>
+                            <Input
+                                id="follow-up-penalty"
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={settings.followUpPenalty}
+                                onChange={(e) => setSettings(s => ({ ...s, followUpPenalty: Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0)) }))}
+                                placeholder="e.g., 10"
+                            />
+                            <p className="text-xs text-muted-foreground">Percentage penalty applied when follow-up questions are generated.</p>
+                        </div>
                     </CardContent>
                 </Card>
 
@@ -161,7 +189,7 @@ const SJTConfigPage = () => {
                 <CardHeader>
                     <CardTitle>SJT Scenarios</CardTitle>
                     <CardDescription>
-                    Define the situations, questions, and rationale for best/worst responses to guide AI analysis. The number of scenarios you create here will be the number of questions in the test.
+                    Define the situations, questions, and rationale for best/worst responses to guide AI analysis. Each scenario can assess multiple competencies by listing them separated by commas. The number of scenarios you create here will be the number of questions in the test.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
@@ -187,9 +215,18 @@ const SJTConfigPage = () => {
                             </div>
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor={`competency-${scenario.id}`}>Primary Competency Assessed</Label>
-                            <Input id={`competency-${scenario.id}`} placeholder="e.g., Customer Focus" value={scenario.assessedCompetency} onChange={(e) => handleScenarioChange(scenario.id, 'assessedCompetency', e.target.value)} required />
-                            </div>
+                            <Label htmlFor={`competency-${scenario.id}`}>Competencies Assessed</Label>
+                            <Input 
+                                id={`competency-${scenario.id}`} 
+                                placeholder="e.g., Customer Focus, Problem Solving, Communication" 
+                                value={scenario.assessedCompetency} 
+                                onChange={(e) => handleScenarioChange(scenario.id, 'assessedCompetency', e.target.value)} 
+                                required 
+                            />
+                            <p className="text-sm text-muted-foreground">
+                                Enter multiple competencies separated by commas. Each competency will be analyzed separately in the report.
+                            </p>
+                        </div>
                         {scenarios.length > 1 && (
                         <Button variant="ghost" size="icon" onClick={() => removeScenario(scenario.id)} type="button" className="absolute top-2 right-2">
                             <Trash2 className="h-5 w-5 text-destructive" />

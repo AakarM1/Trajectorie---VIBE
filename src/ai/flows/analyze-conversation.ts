@@ -52,9 +52,20 @@ export async function analyzeConversation(input: AnalyzeConversationInput): Prom
   // Dynamically determine competencies from the input
   const uniqueCompetencies = [...new Set(input.conversationHistory.map(h => h.competency).filter(Boolean) as string[])];
   
+  // Ensure all questions have competencies by using the question index as fallback
+  const enhancedHistory = input.conversationHistory.map((entry, index) => {
+    return {
+      ...entry,
+      competency: entry.competency || `Interview Question ${index + 1}`,
+    };
+  });
+
   const augmentedInput = {
     ...input,
-    competenciesToAssess: uniqueCompetencies.join(', '),
+    conversationHistory: enhancedHistory,
+    competenciesToAssess: uniqueCompetencies.length > 0 
+      ? uniqueCompetencies.join(', ')
+      : enhancedHistory.map(h => h.competency).join(', '),
   };
 
   return analyzeConversationFlow(augmentedInput);
@@ -71,31 +82,48 @@ const prompt = ai.definePrompt({
 "{{{jobDescription}}}"
 
 **Interview Transcript & Analysis Guidance:**
-For each question, evaluate the candidate's response based on the specific guidance provided.
+For each question, you must evaluate the candidate's response based on the admin-defined competency criteria and ideal answer characteristics provided.
 
 {{#each conversationHistory}}
 ---
-**Question: {{{this.question}}}**
-*AI Guidance for this question (Competency: {{{this.competency}}}):* The ideal answer should align with these characteristics: "{{{this.preferredAnswer}}}"
+**Question {{@index}} - {{{this.question}}}**
+**Required Competency: {{{this.competency}}}**
+**Ideal Answer Criteria:** The ideal response should demonstrate: "{{{this.preferredAnswer}}}"
 
 **Candidate's Answer:** "{{{this.answer}}}"
+
+You must evaluate this answer specifically on how well it demonstrates the "{{{this.competency}}}" competency using the ideal answer criteria as your benchmark.
 ---
 {{/each}}
 
 ANALYSIS REQUIRED:
 
-Based *only* on the conversation and guidance provided, provide the following analysis in the specified JSON format:
+Based *only* on the conversation and criteria provided, provide the following comprehensive analysis in the specified JSON format:
 
 PART 1: QUALITATIVE REPORT
-- **strengths**: A detailed paragraph identifying the key strengths demonstrated by {{{name}}}.
-- **weaknesses**: A detailed paragraph identifying areas where {{{name}}} could improve based on their responses.
-- **summary**: An overall summary of {{{name}}}'s suitability for the {{{roleCategory}}} role, considering the job description.
-- **IMPORTANT**: For each section, use specific examples from the conversation to support your observations. Write in natural language using full sentences. Do NOT use bullet points or special characters.
+
+- **strengths**: Provide a detailed analysis structured as follows:
+  1. **Individual Question Analysis - Strong Performances**: Analyze each question where the candidate performed well, referencing the specific competency demonstrated and how their answer met the ideal criteria.
+  2. **Overall Competency Analysis**: For each competency where the candidate showed strength, provide a comprehensive assessment of their performance across all related questions.
+  3. **Summary**: Overall assessment of the candidate's key strengths.
+
+- **weaknesses**: Provide a detailed analysis structured as follows:
+  1. **Individual Question Analysis - Areas for Development**: Analyze each question where the candidate could improve, explaining how their answer fell short of the ideal criteria for the required competency.
+  2. **Overall Competency Development Areas**: For each competency needing improvement, provide detailed development recommendations and explain the gaps identified.
+  3. **Development Recommendations**: Specific, actionable recommendations for improvement.
+
+- **summary**: Provide a comprehensive assessment structured as follows:
+  1. **Overall Performance Overview**: Include performance distribution, competency coverage, and overall assessment level.
+  2. **Competency Analysis**: Summarize performance for each assessed competency with specific insights.
+  3. **Final Assessment**: Overall suitability determination with specific reasoning.
+
+- **IMPORTANT**: For each section, structure your analysis by competency with specific examples from the conversation. Write in natural language using full sentences and professional assessment language. Provide detailed, actionable insights rather than generic feedback.
 
 PART 2: COMPETENCY ANALYSIS
-- You must assess the candidate on the following competencies: {{{competenciesToAssess}}}.
+- You must assess the candidate on each of the following competencies: {{{competenciesToAssess}}}.
 - For each competency, derive a score from 0 (no evidence) to 10 (excellent evidence).
-- Base your score *strictly* on how the candidate's answer for the corresponding question matches the provided AI guidance.
+- Base your score *strictly* on how the candidate's answer for the corresponding question matches the provided ideal answer criteria.
+- For each competency, consider only the questions specifically tagged with that competency.
 - Group all assessed competencies under a single meta-competency named "Job-Specific Competencies".
 - The competencies within the group MUST be sorted alphabetically in the final output.
 

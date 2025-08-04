@@ -5,6 +5,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { ProtectedRoute, useAuth } from '@/contexts/auth-context';
 import type { ConversationEntry, AnalysisResult, PreInterviewDetails, InterviewMode, Submission } from '@/types';
 import type { AnalyzeSJTResponseInput, AnalyzeSJTResponseOutput } from '@/ai/flows/analyze-sjt-response';
+import type { EvaluateAnswerQualityInput, EvaluateAnswerQualityOutput } from '@/ai/flows/evaluate-answer-quality';
 import Flashcard from '@/components/flashcard';
 import ConversationSummary from '@/components/conversation-summary';
 import { Loader2, PartyPopper } from 'lucide-react';
@@ -15,6 +16,10 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { configurationService } from '@/lib/config-service';
+// 🔒 MINIMAL IMPACT IMPORTS - Progressive upload support for SJT
+import { ProgressiveProvider, useProgressive } from '@/contexts/progressive-context';
+import { featureFlags } from '@/lib/feature-flags';
+import type { ProgressInfo, SaveResult } from '@/types/partial-submission';
 
 
 interface Scenario {
@@ -34,7 +39,7 @@ const fallbackSjtScenarios: Scenario[] = [
     question: "What is your immediate plan of action to handle this situation?",
     bestResponseRationale: "Acknowledge the customer's frustration with empathy, take full ownership of the problem without making excuses, and immediately propose a concrete solution such as expediting the next shipment for free. The focus should be on solving the customer's problem first and rebuilding trust.",
     worstResponseRationale: "Become defensive, blame the logistics team or external factors, or make promises that cannot be kept. A poor response would fail to acknowledge the customer's importance and the severity of the issue.",
-    assessedCompetency: "Customer Focus",
+    assessedCompetency: "Customer Focus, Problem Solving, Communication",
   },
   {
     id: 2,
@@ -42,7 +47,7 @@ const fallbackSjtScenarios: Scenario[] = [
     question: "How would you approach this situation with your team member?",
     bestResponseRationale: "Schedule a private, one-on-one meeting to express concern and create a safe space for them to share any challenges. The ideal approach is to listen actively, ask open-ended questions to understand the root cause (be it workload, personal issues, or skill gaps), and collaboratively develop a support plan.",
     worstResponseRationale: "Criticize the team member publicly, immediately put them on a performance improvement plan without discussion, or simply ignore the problem hoping it will resolve itself. A bad response lacks empathy and fails to investigate the underlying issues.",
-    assessedCompetency: "Coaching & Mentoring",
+    assessedCompetency: "Coaching & Mentoring, Leadership, Emotional Intelligence",
   },
 ];
 
@@ -51,8 +56,11 @@ function SJTInterviewPage() {
   const { user, saveSubmission, canUserTakeTest, getSubmissions } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
+  
+  // 🔒 MINIMAL IMPACT PROGRESSIVE HOOKS - Only used if feature enabled for SJT
+  const progressive = useProgressive();
 
-  const [status, setStatus] = useState<'PRE_INTERVIEW' | 'INTERVIEW' | 'RESULTS' | 'COMPLETED'>('PRE_INTERVIEW');
+  const [status, setStatus] = useState<'PRE_INTERVIEW' | 'INTERVIEW' | 'RESULTS' | 'UPLOADING' | 'COMPLETED'>('PRE_INTERVIEW');
   const [interviewMode, setInterviewMode] = useState<InterviewMode>('video');
   const [preInterviewDetails, setPreInterviewDetails] = useState<PreInterviewDetails | null>(null);
   const [conversationHistory, setConversationHistory] = useState<ConversationEntry[]>([]);
@@ -66,6 +74,8 @@ function SJTInterviewPage() {
   const [questionTimes, setQuestionTimes] = useState<number[]>([]); // Track time per question
   const [canTakeTest, setCanTakeTest] = useState(true);
   const [checkingAttempts, setCheckingAttempts] = useState(true);
+  const [followUpMap, setFollowUpMap] = useState<{[key: number]: number}>({}); // Track follow-up count per question
+  const [maxFollowUps, setMaxFollowUps] = useState(2); // Default max follow-ups per scenario
   
   const MAX_ATTEMPTS = 1;
 
@@ -97,6 +107,13 @@ function SJTInterviewPage() {
     setStatus('INTERVIEW');
     setPreInterviewDetails(details);
     setIsProcessing(true);
+    
+    // 🔒 MINIMAL IMPACT - Initialize progressive session
+    if (progressive.isProgressiveUploadEnabled) {
+      console.log('🚀 Initializing progressive session for SJT...');
+      const sessionId = progressive.startNewSession('SJT');
+      console.log('✅ Progressive session started with ID:', sessionId);
+    }
 
     let scenariosToUse = fallbackSjtScenarios;
 
@@ -120,6 +137,31 @@ function SJTInterviewPage() {
             allScenarios.sort(() => 0.5 - Math.random());
           }
           scenariosToUse = allScenarios.slice(0, numQuestionsToUse);
+          
+          // Check if AI follow-up questions are enabled
+          const numAiQuestions = settings?.aiGeneratedQuestions || 0;
+          if (numAiQuestions > 0) {
+            console.log(`🤖 Setting max follow-up questions per scenario to ${numAiQuestions}`);
+            
+            // Instead of generating all follow-up questions upfront,
+            // we'll just set the maximum number of follow-ups allowed per scenario
+            setMaxFollowUps(numAiQuestions);
+            
+            // Initialize the follow-up map to track follow-ups per question
+            const initialFollowUpMap: {[key: number]: number} = {};
+            scenariosToUse.forEach((_, index) => {
+              initialFollowUpMap[index + 1] = 0; // No follow-ups generated initially
+            });
+            setFollowUpMap(initialFollowUpMap);
+            
+            toast({ 
+              title: `Adaptive Follow-up Questions Enabled`,
+              description: `Up to ${numAiQuestions} follow-up questions will be generated based on your answers.`
+            });
+          } else {
+            // No AI follow-up questions enabled
+            setMaxFollowUps(0);
+          }
         }
         if (settings?.timeLimit) {
           setTimeLimit(settings.timeLimit);
@@ -161,10 +203,16 @@ function SJTInterviewPage() {
 
     setSjtScenarios(scenariosToUse);
 
+    // Create history with all the scenario data needed for AI analysis
     const history = scenariosToUse.map(s => ({ 
-      question: `Situation: ${s.situation}\n\nQuestion: ${s.question}`, 
+      question: `Situation: ${s.situation}\n\nQuestion: ${s.question}`,
       answer: null, 
-      videoDataUri: undefined 
+      videoDataUri: undefined,
+      // Add admin-defined criteria fields for AI analysis
+      situation: s.situation,
+      bestResponseRationale: s.bestResponseRationale,
+      worstResponseRationale: s.worstResponseRationale,
+      assessedCompetency: s.assessedCompetency
     }));
     setConversationHistory(history);
     
@@ -188,22 +236,55 @@ function SJTInterviewPage() {
       }
       
       console.log(`📊 Processing ${answeredHistory.length} answers`);
-      setStatus('COMPLETED'); // Set status immediately to avoid loading screen
+      setStatus('UPLOADING'); // Set status to uploading first if progressive upload is enabled
       setIsProcessing(true);
+      
+      // 🔒 MINIMAL IMPACT - Mark progressive session complete if enabled
+      if (progressive.isProgressiveUploadEnabled && progressive.currentSessionId) {
+        console.log('🏁 Marking progressive session complete...');
+        try {
+          await progressive.markSessionComplete();
+          console.log('✅ Progressive session marked complete');
+        } catch (error) {
+          console.error('❌ Error marking progressive session complete:', error);
+          // Continue with submission anyway
+        }
+      }
+      
+      // Set completed status after uploads are done
+      setStatus('COMPLETED');
       
       try {
         // First, save the submission to database immediately
         console.log('💾 Saving submission to database...');
         
-        // Create a basic result structure
+        // Extract competencies from scenarios
+        const assessedCompetencies = sjtScenarios
+          .filter((_, index) => conversationHistory[index]?.answer) // Only include answered scenarios
+          .map(scenario => scenario.assessedCompetency)
+          .filter(Boolean);
+        
+        // Count unique competencies
+        const uniqueCompetencies = [...new Set(assessedCompetencies)];
+        
+        // Generate competency scores (initially all the same placeholder value)
+        const competencyScores = uniqueCompetencies.map(competency => ({
+          name: competency,
+          score: 5 // Placeholder middle score - will be replaced by AI analysis
+        }));
+        
+        // Create a basic result structure with proper competencies
         const basicResult: AnalysisResult = {
             strengths: `Candidate completed ${answeredHistory.length} out of ${sjtScenarios.length} scenarios. Responses demonstrate engagement with the situational judgement test.`,
             weaknesses: "Detailed analysis pending. Please review individual responses for comprehensive feedback.",
-            summary: `SJT Assessment completed on ${new Date().toLocaleDateString()}. ${answeredHistory.length} scenarios answered out of ${sjtScenarios.length} total scenarios.`,
-            competencyAnalysis: [{
-                name: "SJT Completion",
+            summary: `SJT Assessment completed on ${new Date().toLocaleDateString()}. ${answeredHistory.length} scenarios answered out of ${sjtScenarios.length} total scenarios. Analysis will evaluate ${uniqueCompetencies.length} competency areas.`,
+            competencyAnalysis: competencyScores.length > 0 ? [{
+                name: "Situational Competencies",
+                competencies: competencyScores
+            }] : [{
+                name: "Assessment Completion",
                 competencies: [{
-                    name: "Participation",
+                    name: "Overall Participation",
                     score: Math.round((answeredHistory.length / sjtScenarios.length) * 10)
                 }]
             }]
@@ -240,8 +321,17 @@ function SJTInterviewPage() {
   }, [conversationHistory, preInterviewDetails, saveSubmission, sjtScenarios, toast, showReport]);
 
 
+  // Import evaluate-answer-quality at the top of the file
   const handleAnswerSubmit = async (answer: string, videoDataUri?: string) => {
     setIsSavingAnswer(true);
+    // Show saving toast with improved styling
+    toast({
+      title: "Saving Answer",
+      description: "Processing your response...",
+      duration: 3000,
+      className: "bg-gray-50 border border-gray-200 text-gray-800",
+    });
+    
     const updatedHistory = [...conversationHistory];
     updatedHistory[currentQuestionIndex] = {
       ...updatedHistory[currentQuestionIndex],
@@ -249,15 +339,226 @@ function SJTInterviewPage() {
       videoDataUri,
     };
     setConversationHistory(updatedHistory);
-    toast({
+    
+    // 🔒 MINIMAL IMPACT - Progressive upload if enabled
+    if (progressive.isProgressiveUploadEnabled && progressive.currentSessionId) {
+      console.log('🔄 Progressive upload enabled, saving answer with upload...');
+      try {
+        const result = await progressive.saveQuestionWithUpload(
+          currentQuestionIndex,
+          updatedHistory[currentQuestionIndex],
+          'SJT',
+          updatedHistory.length,
+          (progress, type) => {
+            // Show upload progress toast if it's taking time
+            if (progress === 25 || progress === 50 || progress === 75) {
+              toast({
+                title: `Uploading ${type} (${progress}%)`,
+                description: "Please wait while your response is being securely saved...",
+                duration: 2000,
+                className: "bg-blue-50 border border-blue-200 text-blue-800",
+              });
+            }
+          }
+        );
+        
+        if (!result.success) {
+          console.warn('⚠️ Progressive save failed, continuing with regular flow:', result.error);
+          // No need to show error to user - we'll continue with regular flow
+        }
+      } catch (error) {
+        console.error('❌ Error in progressive save:', error);
+        // Continue with regular flow, don't block the UI
+      }
+    }
+    // Identify if this is a base question or a follow-up
+    const currentScenario = sjtScenarios.find(s => {
+      const questionText = updatedHistory[currentQuestionIndex].question;
+      return questionText.includes(s.situation) && questionText.includes(s.question);
+    });
+    
+    if (!currentScenario) {
+      console.error("Could not identify current scenario for answer evaluation");
+      toast({
         title: "Answer Saved!",
         description: "You can move to the next question or review your answer.",
-    });
-    // Move to next question automatically
-    if (currentQuestionIndex < conversationHistory.length - 1) {
-      setCurrentQuestionIndex(currentQuestionIndex + 1);
+      });
+      setIsSavingAnswer(false);
+      
+      // Move to next question automatically
+      if (currentQuestionIndex < conversationHistory.length - 1) {
+        setCurrentQuestionIndex(currentQuestionIndex + 1);
+      }
+      return;
     }
-    setIsSavingAnswer(false);
+    
+    // Determine if this is already a follow-up or a base question
+    const isFollowUp = updatedHistory[currentQuestionIndex].question.match(/\d+\.[a-z]\)/);
+    
+    // Get or extract the base question number depending on whether this is a follow-up
+    let baseQuestionNumber;
+    
+    if (isFollowUp) {
+      // Extract base question number from the follow-up question format (e.g., "1.a)" -> 1)
+      const match = updatedHistory[currentQuestionIndex].question.match(/(\d+)\.[a-z]\)/);
+      if (match && match[1]) {
+        baseQuestionNumber = parseInt(match[1]);
+      } else {
+        console.error("Could not extract base question number from follow-up");
+        baseQuestionNumber = currentScenario.id;
+      }
+      
+      console.log(`This is follow-up question for base question ${baseQuestionNumber}`);
+    } else {
+      // For base questions, get the question number from the scenario ID
+      baseQuestionNumber = sjtScenarios.findIndex(s => s.id === currentScenario.id) + 1;
+    }
+    
+    try {
+      // Get current follow-up count for this base question
+      const currentFollowUpCount = followUpMap[baseQuestionNumber] || 0;
+      
+      // If we already have max follow-ups or max configured is 0, skip evaluation
+      if (currentFollowUpCount >= maxFollowUps || maxFollowUps === 0) {
+        console.log(`Skipping follow-up evaluation: current=${currentFollowUpCount}, max=${maxFollowUps}`);
+        toast({
+          title: "Answer Saved!",
+          description: "Moving to the next question.",
+          duration: 3000,
+        });
+        setIsSavingAnswer(false);
+        
+        // Move to next question automatically
+        if (currentQuestionIndex < conversationHistory.length - 1) {
+          setCurrentQuestionIndex(currentQuestionIndex + 1);
+        }
+        return;
+      }
+      
+      // For follow-up questions, we need to increment the follow-up count for the base question
+      // but use the same base question number for tracking
+      
+      toast({
+        title: "Evaluating your answer...",
+        description: "Please wait while we analyze your response.",
+        duration: 5000, // 5 seconds duration
+        className: "bg-blue-50 border border-blue-200 text-blue-800",
+      });
+      
+      // Prepare input for evaluation
+      const evaluationInput = {
+        situation: currentScenario.situation,
+        question: currentScenario.question,
+        bestResponseRationale: currentScenario.bestResponseRationale,
+        assessedCompetency: currentScenario.assessedCompetency,
+        candidateAnswer: answer,
+        questionNumber: baseQuestionNumber,
+        followUpCount: currentFollowUpCount,
+        maxFollowUps: maxFollowUps
+      };
+      
+      console.log("🔍 Evaluating answer quality:", evaluationInput);
+      
+      // Use the API route to evaluate the answer quality
+      const response = await fetch('/api/ai/evaluate-answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(evaluationInput)
+      });
+      
+      if (!response.ok) {
+        throw new Error(`API responded with status: ${response.status}`);
+      }
+      
+      const evaluation = await response.json();
+      console.log("✅ Answer evaluation result:", evaluation);
+      
+      // Check if answer is complete or if we need a follow-up question
+      if (!evaluation.isComplete && evaluation.followUpQuestion) {
+        // Create a new follow-up question
+        const newFollowUpScenario: Scenario = {
+          id: currentScenario.id + 1000 + currentFollowUpCount, // Unique ID for follow-up
+          situation: currentScenario.situation,
+          question: evaluation.followUpQuestion,
+          bestResponseRationale: currentScenario.bestResponseRationale,
+          worstResponseRationale: currentScenario.worstResponseRationale,
+          assessedCompetency: currentScenario.assessedCompetency
+        };
+        
+        // Add the new scenario to our list
+        const updatedScenarios = [...sjtScenarios];
+        updatedScenarios.splice(currentQuestionIndex + 1, 0, newFollowUpScenario);
+        setSjtScenarios(updatedScenarios);
+        
+        // Create conversation entry for the new follow-up with improved formatting
+        const newConversationEntry = {
+          // Format the question with proper spacing and highlighting for follow-up
+          question: `Situation: ${newFollowUpScenario.situation}\n\nFollow-up Question: ${newFollowUpScenario.question}`,
+          answer: null,
+          videoDataUri: undefined,
+          preferredAnswer: undefined, // 🔒 EXPLICIT undefined for SJT follow-ups
+          competency: undefined, // 🔒 EXPLICIT undefined for SJT follow-ups
+          situation: newFollowUpScenario.situation,
+          bestResponseRationale: newFollowUpScenario.bestResponseRationale,
+          worstResponseRationale: newFollowUpScenario.worstResponseRationale,
+          assessedCompetency: newFollowUpScenario.assessedCompetency
+        };
+        
+        // Update conversation history with new follow-up
+        const newHistory = [...updatedHistory];
+        newHistory.splice(currentQuestionIndex + 1, 0, newConversationEntry);
+        
+        // Mark the current question as having generated a follow-up for penalty calculation
+        newHistory[currentQuestionIndex].followUpGenerated = true;
+        
+        setConversationHistory(newHistory);
+        
+        // Update follow-up count for this base question
+        setFollowUpMap({
+          ...followUpMap,
+          [baseQuestionNumber]: currentFollowUpCount + 1
+        });
+        
+        // Update question times array to match new structure
+        const newQuestionTimes = [...questionTimes];
+        newQuestionTimes.splice(currentQuestionIndex + 1, 0, 0);
+        setQuestionTimes(newQuestionTimes);
+        
+        // Log AI rationale to console for debugging (not shown to user)
+        console.log("Follow-up Question Generated - AI Rationale:", evaluation.rationale);
+        
+        toast({
+          title: "Follow-up Question Generated",
+          description: "Based on your response, we have a follow-up question to explore further.",
+          duration: 5000, // 5 seconds duration
+          className: "bg-green-50 border border-green-200 text-green-800", 
+        });
+        
+        // Move specifically to the follow-up question we just inserted
+        setIsSavingAnswer(false);
+        setCurrentQuestionIndex(currentQuestionIndex + 1);
+        return; // Exit early to avoid the automatic navigation in finally block
+      } else {
+        // Log AI rationale to console for debugging (not shown to user)
+        console.log("Answer Complete - AI Rationale:", evaluation.rationale);
+        
+        toast({
+          title: "Answer Complete",
+          description: "Your response has been recorded. Moving to the next question.",
+          duration: 5000, // 5 seconds duration
+          className: "bg-green-50 border border-green-200 text-green-800",
+        });
+      }
+    } catch (error) {
+      console.error("Error evaluating answer quality:", error);
+    } finally {
+      setIsSavingAnswer(false);
+      
+      // Move to next question automatically only if we didn't generate a follow-up
+      if (currentQuestionIndex < conversationHistory.length - 1) {
+        setCurrentQuestionIndex(currentQuestionIndex + 1);
+      }
+    }
   };
   
   useEffect(() => {
@@ -273,6 +574,15 @@ function SJTInterviewPage() {
   const currentEntry = conversationHistory[currentQuestionIndex];
   const answeredQuestionsCount = conversationHistory.filter(entry => entry.answer !== null).length;
 
+  // 🔒 MINIMAL IMPACT - Check for any active uploads
+  const hasActiveUpload = useCallback(() => {
+    if (!progressive.isProgressiveUploadEnabled || !progressive.uploadProgress) {
+      return false;
+    }
+    
+    return progressive.uploadProgress.size > 0;
+  }, [progressive.isProgressiveUploadEnabled, progressive.uploadProgress]);
+  
   const renderContent = () => {
     switch (status) {
       case 'PRE_INTERVIEW':
@@ -286,6 +596,7 @@ function SJTInterviewPage() {
               </div>
            );
         }
+        
         return (
           <div className="w-full max-w-6xl flex flex-col items-center">
             <Flashcard
@@ -319,7 +630,26 @@ function SJTInterviewPage() {
             reattemptText="Back to Dashboard"
           />
         );
-       case 'COMPLETED':
+       case 'UPLOADING':
+        return (
+            <Card className="w-full max-w-lg text-center animate-fadeIn shadow-lg">
+                <CardContent className="p-8">
+                    <div className="h-16 w-16 text-blue-500 mx-auto mb-4 animate-pulse">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                        </svg>
+                    </div>
+                    <h2 className="text-2xl font-headline text-primary mb-2">Finalizing your submission...</h2>
+                    <p className="text-muted-foreground mb-6">
+                        Please wait while we process your answers.
+                    </p>
+                    <div className="w-full bg-gray-200 rounded-full h-2.5 mb-6">
+                        <div className="bg-blue-600 h-2.5 rounded-full animate-pulse" style={{ width: '80%' }}></div>
+                    </div>
+                </CardContent>
+            </Card>
+        );
+      case 'COMPLETED':
         return (
             <Card className="w-full max-w-lg text-center animate-fadeIn shadow-lg">
                 <CardContent className="p-8">
@@ -390,7 +720,9 @@ function SJTInterviewPage() {
 export default function ProtectedSJTInterviewPage() {
     return (
         <ProtectedRoute>
-            <SJTInterviewPage />
+            <ProgressiveProvider>
+                <SJTInterviewPage />
+            </ProgressiveProvider>
         </ProtectedRoute>
     )
 }

@@ -33,7 +33,7 @@ const prompt = ai.definePrompt({
   name: 'generateInterviewQuestionsPrompt',
   input: {schema: GenerateInterviewQuestionsInputSchema},
   output: {schema: GenerateInterviewQuestionsOutputSchema},
-  model: 'googleai/gemini-2.0-flash',
+  model: 'openai/gpt-4-turbo',
   prompt: `You are an expert AI interviewer. Your task is to generate a set of {{numberOfQuestions}} diverse and insightful interview questions for a {{{roleCategory}}} role.
 The questions should be based on the provided job description to assess the candidate's suitability.
 
@@ -58,18 +58,57 @@ const generateInterviewQuestionsFlow = ai.defineFlow(
     outputSchema: GenerateInterviewQuestionsOutputSchema,
   },
   async (input: GenerateInterviewQuestionsInput): Promise<GenerateInterviewQuestionsOutput> => {
-    const {output} = await prompt(input);
-    if (output && output.questions && output.questions.length > 0) {
-      return output;
+    try {
+      console.log('🚀 Generating interview questions with input:', input);
+      
+      const {output} = await prompt(input);
+      console.log('✅ AI response received:', output);
+      
+      if (output && output.questions && output.questions.length > 0) {
+        console.log(`✅ Successfully generated ${output.questions.length} questions`);
+        return output;
+      } else {
+        console.warn('⚠️ AI returned empty or invalid questions, using fallbacks');
+      }
+    } catch (error) {
+      console.error('❌ Error in generate interview questions flow:', error);
     }
+    
     // Fallback if AI fails
-    const fallbackQuestions = [
-      `Hello ${input.name || 'candidate'}, thank you for your interest in the ${input.roleCategory} role. To start, please introduce yourself and tell me a bit about why you're applying for this position.`,
-      `Could you describe a challenging project you worked on and how you approached it?`,
-      `What do you know about our company and this ${input.roleCategory} role?`,
-      `Where do you see yourself in five years?`,
-      `Do you have any questions for us?`,
-    ];
+    console.log('📋 Using fallback questions');
+    let fallbackQuestions;
+    
+    if (input.isFollowUp) {
+      // Situational follow-up questions for SJT
+      if (input.roleCategory.toLowerCase().includes('situation')) {
+        fallbackQuestions = [
+          `What specific skills would you utilize to handle this situation effectively?`,
+          `What would be your top priority when addressing this scenario?`,
+          `How would you measure the success of your approach to this situation?`,
+          `What potential challenges do you anticipate in this scenario?`,
+          `How would you adapt your approach if your initial solution didn't work?`,
+        ];
+      } else {
+        // Generic follow-up questions for interviews
+        fallbackQuestions = [
+          `Can you elaborate on how you've demonstrated these skills in your previous roles?`,
+          `What specific experience do you have that relates directly to this aspect of the role?`,
+          `How would you approach solving a complex problem in this area?`,
+          `What metrics would you use to measure success in this aspect of the position?`,
+          `How do you stay current with developments in this field?`,
+        ];
+      }
+    } else {
+      // Standard interview questions
+      fallbackQuestions = [
+        `Hello ${input.name || 'candidate'}, thank you for your interest in the ${input.roleCategory} role. To start, please introduce yourself and tell me a bit about why you're applying for this position.`,
+        `Could you describe a challenging project you worked on and how you approached it?`,
+        `What do you know about our company and this ${input.roleCategory} role?`,
+        `Where do you see yourself in five years?`,
+        `Do you have any questions for us?`,
+      ];
+    }
+    
     return { questions: fallbackQuestions.slice(0, input.numberOfQuestions) };
   }
 );

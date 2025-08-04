@@ -40,17 +40,14 @@ interface AuthContextType {
   updateUser: (userId: string, updates: Partial<User>) => Promise<void>;
 }
 
+// 🔒 CRITICAL FIX: Remove duplicate declarations
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
 const ADMIN_EMAIL = 'admin@gmail.com';
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Fallback keys for localStorage (when Firestore is unavailable)
 const USERS_KEY = 'verbal-insights-users';
 const SESSION_KEY = 'verbal-insights-session';
 const SUBMISSIONS_KEY = 'verbal-insights-submissions';
-const ADMIN_EMAIL = 'admin@gmail.com';
 
 // Check if we should use localStorage instead of Firestore
 const useLocalStorage = () => {
