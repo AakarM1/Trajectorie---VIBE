@@ -309,8 +309,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               // Generate a temporary submission ID for organizing files
               const tempSubmissionId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
               
-              // Upload to Firebase Storage
-              const downloadURL = await uploadMediaToStorage(blob, tempSubmissionId, index, mediaType);
+              // 🔒 ENHANCED UPLOAD - Pass candidate name for user-named folders
+              const downloadURL = await uploadMediaToStorage(
+                blob, 
+                tempSubmissionId, 
+                index, 
+                mediaType,
+                submissionWithCandidateId.candidateName // 🔒 NEW PARAMETER for user-named folders
+              );
               
               // Return entry with Firebase Storage URL instead of data URI
               return {

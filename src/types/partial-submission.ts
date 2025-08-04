@@ -24,16 +24,16 @@ export interface PartialSubmission {
   // Question data (same structure as ConversationEntry)
   question: string;
   answer: string | null;
-  videoDataUri?: string;      // Video/audio data or Firebase Storage URL
-  videoUrl?: string;          // 🔒 NEW FIELD - Firebase Storage URL when uploaded progressively
-  preferredAnswer?: string;
-  competency?: string;
+  videoDataUri?: string | null;      // Video/audio data or Firebase Storage URL
+  videoUrl?: string | null;          // 🔒 NEW FIELD - Firebase Storage URL when uploaded progressively
+  preferredAnswer?: string | null;
+  competency?: string | null;
   
   // SJT specific fields
-  situation?: string;
-  bestResponseRationale?: string;
-  worstResponseRationale?: string;
-  assessedCompetency?: string;
+  situation?: string | null;
+  bestResponseRationale?: string | null;
+  worstResponseRationale?: string | null;
+  assessedCompetency?: string | null;
   
   // Metadata for tracking
   timestamp: Date;            // When this was saved

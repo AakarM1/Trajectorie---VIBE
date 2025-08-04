@@ -417,17 +417,18 @@ function VerbalInterviewPage() {
       
       const success = await progressive.resumeSession(sessionId);
       if (success && recoveryData) {
-        // Load recovered data into current state
+        // 🔒 CRITICAL FIX: Map PartialSubmission to ConversationEntry with correct types
         setConversationHistory(recoveryData.partialSubmissions.map(p => ({
           question: p.question,
           answer: p.answer,
-          videoDataUri: p.videoDataUri,
-          preferredAnswer: p.preferredAnswer,
-          competency: p.competency,
-          situation: p.situation,
-          bestResponseRationale: p.bestResponseRationale,
-          worstResponseRationale: p.worstResponseRationale,
-          assessedCompetency: p.assessedCompetency
+          // Convert string | null to string | undefined for ConversationEntry
+          videoDataUri: p.videoDataUri || undefined,
+          preferredAnswer: p.preferredAnswer || undefined,
+          competency: p.competency || undefined,
+          situation: p.situation || undefined,
+          bestResponseRationale: p.bestResponseRationale || undefined,
+          worstResponseRationale: p.worstResponseRationale || undefined,
+          assessedCompetency: p.assessedCompetency || undefined
         })));
         
         setCurrentQuestionIndex(recoveryData.lastQuestionIndex + 1);

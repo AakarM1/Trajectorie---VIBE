@@ -499,6 +499,8 @@ function SJTInterviewPage() {
           question: `Situation: ${newFollowUpScenario.situation}\n\nFollow-up Question: ${newFollowUpScenario.question}`,
           answer: null,
           videoDataUri: undefined,
+          preferredAnswer: undefined, // 🔒 EXPLICIT undefined for SJT follow-ups
+          competency: undefined, // 🔒 EXPLICIT undefined for SJT follow-ups
           situation: newFollowUpScenario.situation,
           bestResponseRationale: newFollowUpScenario.bestResponseRationale,
           worstResponseRationale: newFollowUpScenario.worstResponseRationale,
@@ -595,6 +597,8 @@ function SJTInterviewPage() {
                     const restoredHistory: ConversationEntry[] = new Array(recovery.totalQuestions).fill(null).map(() => ({
                       question: '',
                       answer: null,
+                      preferredAnswer: undefined, // 🔒 EXPLICIT undefined for SJT
+                      competency: undefined, // 🔒 EXPLICIT undefined for SJT
                     }));
                     
                     // Fill in recovered answers
@@ -602,6 +606,8 @@ function SJTInterviewPage() {
                       const entry: ConversationEntry = {
                         question: partial.question || '',
                         answer: null, // Initialize with null as required by type
+                        preferredAnswer: undefined, // 🔒 EXPLICIT undefined for SJT
+                        competency: undefined, // 🔒 EXPLICIT undefined for SJT
                       };
                       
                       // Add optional fields only if they exist
