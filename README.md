@@ -1,6 +1,6 @@
 # Verbal Insights - AI-Powered Interview Platform
 
-🚀 **Advanced AI-Powered Interview Assessment Platform** with comprehensive documentation and architecture guides.
+🚀 **Advanced AI-Powered Interview Assessment Platform** with documentation and architecture guides.
 
 ## 🌟 Platform Overview
 
