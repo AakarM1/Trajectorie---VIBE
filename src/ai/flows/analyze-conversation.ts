@@ -86,7 +86,7 @@ For each question, you must evaluate the candidate's response based on the admin
 
 {{#each conversationHistory}}
 ---
-**Question: {{{this.question}}}**
+**Question {{@index}} - {{{this.question}}}**
 **Required Competency: {{{this.competency}}}**
 **Ideal Answer Criteria:** The ideal response should demonstrate: "{{{this.preferredAnswer}}}"
 
@@ -98,13 +98,26 @@ You must evaluate this answer specifically on how well it demonstrates the "{{{t
 
 ANALYSIS REQUIRED:
 
-Based *only* on the conversation and criteria provided, provide the following analysis in the specified JSON format:
+Based *only* on the conversation and criteria provided, provide the following comprehensive analysis in the specified JSON format:
 
 PART 1: QUALITATIVE REPORT
-- **strengths**: A detailed analysis identifying the key competencies where {{{name}}} performed well. For each strength, reference specific answers that demonstrated mastery of the required competencies.
-- **weaknesses**: A detailed analysis identifying the competencies where {{{name}}} could improve. For each weakness, explain how their answers failed to meet the ideal criteria for those competencies.
-- **summary**: An overall evaluation of {{{name}}}'s suitability for the {{{roleCategory}}} role, emphasizing their performance across all assessed competencies.
-- **IMPORTANT**: For each section, structure your analysis by competency with specific examples from the conversation. Write in natural language using full sentences and professional assessment language.
+
+- **strengths**: Provide a detailed analysis structured as follows:
+  1. **Individual Question Analysis - Strong Performances**: Analyze each question where the candidate performed well, referencing the specific competency demonstrated and how their answer met the ideal criteria.
+  2. **Overall Competency Analysis**: For each competency where the candidate showed strength, provide a comprehensive assessment of their performance across all related questions.
+  3. **Summary**: Overall assessment of the candidate's key strengths.
+
+- **weaknesses**: Provide a detailed analysis structured as follows:
+  1. **Individual Question Analysis - Areas for Development**: Analyze each question where the candidate could improve, explaining how their answer fell short of the ideal criteria for the required competency.
+  2. **Overall Competency Development Areas**: For each competency needing improvement, provide detailed development recommendations and explain the gaps identified.
+  3. **Development Recommendations**: Specific, actionable recommendations for improvement.
+
+- **summary**: Provide a comprehensive assessment structured as follows:
+  1. **Overall Performance Overview**: Include performance distribution, competency coverage, and overall assessment level.
+  2. **Competency Analysis**: Summarize performance for each assessed competency with specific insights.
+  3. **Final Assessment**: Overall suitability determination with specific reasoning.
+
+- **IMPORTANT**: For each section, structure your analysis by competency with specific examples from the conversation. Write in natural language using full sentences and professional assessment language. Provide detailed, actionable insights rather than generic feedback.
 
 PART 2: COMPETENCY ANALYSIS
 - You must assess the candidate on each of the following competencies: {{{competenciesToAssess}}}.
