@@ -257,19 +257,30 @@ const Flashcard: React.FC<FlashcardProps> = ({
       });
       return;
     }
+    
     setIsTranscribing(true);
+    
     try {
       const input: TranscribeAudioInput = { audioDataUri: dataUri };
+      
+      // Direct transcription call
       const result = await transcribeAudio(input);
       setEditableTranscription(result.transcription);
+      setIsTranscribing(false);
+      
+      toast({
+        variant: "default",
+        title: "Transcription Complete",
+        description: "Audio has been successfully transcribed.",
+      });
+      
     } catch (error) {
       console.error("Transcription error:", error);
       toast({
         variant: "destructive",
         title: "Transcription Failed",
-        description: "Could not transcribe from the recording. Please try again.",
+        description: "Could not transcribe audio. Please try again.",
       });
-    } finally {
       setIsTranscribing(false);
     }
   };

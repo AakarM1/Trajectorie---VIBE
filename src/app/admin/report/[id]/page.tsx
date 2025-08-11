@@ -6,7 +6,7 @@ import { ProtectedRoute, useAuth } from '@/contexts/auth-context';
 import { useParams, useRouter } from 'next/navigation';
 import type { Submission } from '@/types';
 import ConversationSummary from '@/components/conversation-summary';
-import { Loader2, ArrowLeft, RefreshCw } from 'lucide-react';
+import { Loader2, ArrowLeft, RefreshCw, RotateCcw } from 'lucide-react';
 import Header from '@/components/header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -21,6 +21,7 @@ const ReportDetailPage = () => {
     const [submission, setSubmission] = useState<Submission | null>(null);
     const [loading, setLoading] = useState(true);
     const [generatingAnalysis, setGeneratingAnalysis] = useState(false);
+    const [regeneratingAnalysis, setRegeneratingAnalysis] = useState(false);
     const [analysisError, setAnalysisError] = useState<string | null>(null);
 
     const fetchSubmission = async () => {
@@ -61,29 +62,34 @@ const ReportDetailPage = () => {
         return hasBasicAnalysis;
     };
 
-    const generateAiAnalysis = async () => {
+    const generateAiAnalysis = async (isRegeneration = false) => {
         if (!submission) return;
         
-        setGeneratingAnalysis(true);
+        if (isRegeneration) {
+            setRegeneratingAnalysis(true);
+        } else {
+            setGeneratingAnalysis(true);
+        }
         setAnalysisError(null);
         
         try {
-            console.log('🤖 Generating AI analysis for submission:', submission.id);
+            console.log(`🤖 ${isRegeneration ? 'Regenerating' : 'Generating'} AI analysis for submission:`, submission.id);
             
             const response = await fetch('/api/background-analysis', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     submissionId: submission.id,
-                    type: submission.testType.toLowerCase() === 'jdt' ? 'interview' : 'sjt'
+                    type: submission.testType.toLowerCase() === 'jdt' ? 'interview' : 'sjt',
+                    forceRegenerate: isRegeneration
                 }),
             });
             
             if (!response.ok) {
-                throw new Error(`Analysis generation failed: ${response.status}`);
+                throw new Error(`Analysis ${isRegeneration ? 'regeneration' : 'generation'} failed: ${response.status}`);
             }
             
-            console.log('✅ AI analysis generation triggered');
+            console.log(`✅ AI analysis ${isRegeneration ? 'regeneration' : 'generation'} triggered`);
             
             // Poll for updates every 3 seconds, but with more lenient success detection
             const pollForUpdates = async () => {
@@ -103,10 +109,14 @@ const ReportDetailPage = () => {
                             const isRecentlyUpdated = timeDiff < twoMinutesInMs;
                             const hasNewContent = JSON.stringify(updatedSubmission.report) !== JSON.stringify(submission.report);
                             
-                            if (isRecentlyUpdated || hasNewContent || !needsAiAnalysis(updatedSubmission)) {
+                            if (isRecentlyUpdated || hasNewContent || (!isRegeneration && !needsAiAnalysis(updatedSubmission))) {
                                 setSubmission(updatedSubmission);
-                                setGeneratingAnalysis(false);
-                                console.log('✅ AI analysis completed and updated');
+                                if (isRegeneration) {
+                                    setRegeneratingAnalysis(false);
+                                } else {
+                                    setGeneratingAnalysis(false);
+                                }
+                                console.log(`✅ AI analysis ${isRegeneration ? 'regeneration' : 'generation'} completed and updated`);
                                 return;
                             }
                         }
@@ -116,18 +126,28 @@ const ReportDetailPage = () => {
                 }
                 
                 // If we get here, polling timed out - but provide a helpful message
-                setGeneratingAnalysis(false);
+                if (isRegeneration) {
+                    setRegeneratingAnalysis(false);
+                } else {
+                    setGeneratingAnalysis(false);
+                }
                 setAnalysisError('Analysis may have completed. Please refresh the page to see the latest results.');
             };
             
             pollForUpdates();
             
         } catch (error) {
-            console.error('Error generating AI analysis:', error);
-            setGeneratingAnalysis(false);
-            setAnalysisError(error instanceof Error ? error.message : 'Failed to generate analysis');
+            console.error(`Error ${isRegeneration ? 'regenerating' : 'generating'} AI analysis:`, error);
+            if (isRegeneration) {
+                setRegeneratingAnalysis(false);
+            } else {
+                setGeneratingAnalysis(false);
+            }
+            setAnalysisError(error instanceof Error ? error.message : `Failed to ${isRegeneration ? 'regenerate' : 'generate'} analysis`);
         }
     };
+
+    const regenerateAnalysis = () => generateAiAnalysis(true);
 
     const handleBack = () => {
         router.push('/admin/submissions');
@@ -155,6 +175,7 @@ const ReportDetailPage = () => {
 
     // Check if we need to generate AI analysis
     const showAnalysisGeneration = needsAiAnalysis(submission);
+    const hasExistingAnalysis = !showAnalysisGeneration;
 
     return (
         <div className="flex flex-col min-h-screen">
@@ -182,12 +203,55 @@ const ReportDetailPage = () => {
                                     </p>
                                 </div>
                                 <Button 
-                                    onClick={generateAiAnalysis}
+                                    onClick={() => generateAiAnalysis(false)}
                                     className="ml-4"
-                                    disabled={generatingAnalysis}
+                                    disabled={generatingAnalysis || regeneratingAnalysis}
                                 >
                                     Generate AI Analysis
                                 </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
+
+                {hasExistingAnalysis && !regeneratingAnalysis && !generatingAnalysis && (
+                    <Card className="w-full max-w-4xl mb-6 border-green-200 bg-green-50">
+                        <CardContent className="p-6">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <h3 className="text-lg font-semibold text-green-800 mb-2">
+                                        Analysis Complete
+                                    </h3>
+                                    <p className="text-green-700">
+                                        AI analysis has been completed. You can regenerate the analysis to get updated results based on the latest algorithms.
+                                    </p>
+                                </div>
+                                <Button 
+                                    onClick={regenerateAnalysis}
+                                    variant="outline"
+                                    className="ml-4 border-green-300 text-green-700 hover:bg-green-100"
+                                >
+                                    <RotateCcw className="mr-2 h-4 w-4" />
+                                    Regenerate Analysis
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
+                
+                {regeneratingAnalysis && (
+                    <Card className="w-full max-w-4xl mb-6 border-purple-200 bg-purple-50">
+                        <CardContent className="p-6">
+                            <div className="flex items-center">
+                                <Loader2 className="h-6 w-6 animate-spin text-purple-600 mr-3" />
+                                <div>
+                                    <h3 className="text-lg font-semibold text-purple-800 mb-1">
+                                        Regenerating AI Analysis...
+                                    </h3>
+                                    <p className="text-purple-700">
+                                        This may take 1-2 minutes. The page will update automatically when complete.
+                                    </p>
+                                </div>
                             </div>
                         </CardContent>
                     </Card>
@@ -231,11 +295,12 @@ const ReportDetailPage = () => {
                                         Refresh Page
                                     </Button>
                                     <Button 
-                                        onClick={generateAiAnalysis}
+                                        onClick={() => generateAiAnalysis(hasExistingAnalysis)}
                                         variant="outline"
                                         className="border-red-300 text-red-700 hover:bg-red-100"
+                                        disabled={generatingAnalysis || regeneratingAnalysis}
                                     >
-                                        Retry Analysis
+                                        {hasExistingAnalysis ? 'Retry Regeneration' : 'Retry Analysis'}
                                     </Button>
                                 </div>
                             </div>

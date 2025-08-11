@@ -1,0 +1,39 @@
+{
+  "name": "transcription-queue-dependencies",
+  "description": "Required packages for each phase of transcription queue implementation",
+  "phases": {
+    "phase1_memory": {
+      "description": "In-memory queue - no additional dependencies required",
+      "dependencies": {},
+      "devDependencies": {}
+    },
+    "phase2_database": {
+      "description": "Database-persistent queue using Firebase",
+      "dependencies": {
+        "firebase": "^10.7.1"
+      },
+      "devDependencies": {},
+      "note": "Firebase is already configured in the project"
+    },
+    "phase3_redis": {
+      "description": "Redis-based enterprise queue",
+      "dependencies": {
+        "ioredis": "^5.3.2",
+        "uuid": "^9.0.1"
+      },
+      "devDependencies": {
+        "@types/uuid": "^9.0.7"
+      },
+      "additional_setup": [
+        "Redis server installation required",
+        "Docker: docker run -d --name redis -p 6379:6379 redis:alpine",
+        "Or use Redis Cloud/AWS ElastiCache for production"
+      ]
+    }
+  },
+  "installation_commands": {
+    "phase1": "# No additional packages needed",
+    "phase2": "# Firebase already configured",
+    "phase3": "npm install ioredis uuid && npm install -D @types/uuid"
+  }
+}

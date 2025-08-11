@@ -197,13 +197,6 @@ const ConversationSummary: React.FC<ConversationSummaryProps> = ({ analysisResul
         }
 
 
-        // Summary
-        checkY(20);
-        page.drawText('Overall Summary', { x: PADDING, y, font: helveticaBoldFont, size: 16 });
-        y -= 20;
-        drawWrappedText(analysisResult.summary, helveticaFont, FONT_SIZE, PADDING, width - 2 * PADDING, textColor, 15);
-        y -= 20;
-        
         // Strengths
         checkY(20);
         page.drawText('Strengths', { x: PADDING, y, font: helveticaBoldFont, size: 16 });
@@ -319,10 +312,6 @@ const ConversationSummary: React.FC<ConversationSummaryProps> = ({ analysisResul
                     <ThumbsDown className="mr-2 h-6 w-6" /> Weaknesses
                 </h3>
                 <p className="text-foreground whitespace-pre-wrap text-sm">{analysisResult.weaknesses}</p>
-                </div>
-                <div className="p-4 border rounded-lg bg-secondary/30 shadow-inner">
-                <h3 className="text-xl font-semibold mb-2 text-foreground font-headline">Overall Summary:</h3>
-                <p className="text-foreground whitespace-pre-wrap text-sm">{analysisResult.summary}</p>
                 </div>
             </div>
              <div>
