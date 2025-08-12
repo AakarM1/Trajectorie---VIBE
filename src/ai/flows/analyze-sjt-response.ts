@@ -18,28 +18,47 @@ const AnalyzeSJTResponseInputSchema = z.object({
   worstResponseRationale: z.string().describe('A description of the thought process or actions that would constitute the worst possible response.'),
   assessedCompetency: z.string().describe('The primary competency being measured by this scenario (e.g., "Problem Solving").'),
   candidateAnswer: z.string().describe("The candidate's transcribed answer to the question."),
-  // Enhanced context for follow-up conversations (optional for backwards compatibility)
-  conversationThread: z.array(z.object({
-    question: z.string(),
-    answer: z.string(),
-    isFollowUp: z.boolean()
-  })).optional().describe('Complete conversation thread for this scenario including original and follow-up questions'),
-  hasMultipleResponses: z.boolean().optional().describe('Flag indicating this scenario had multiple follow-up questions'),
+  conversationContext: z.string().optional().describe("Complete question-answer dialogue including follow-ups for context."),
+  hasFollowUps: z.boolean().optional().describe("Whether this response includes follow-up questions and answers."),
+  generateFeedback: z.boolean().optional().describe("Whether to generate detailed feedback instead of just scoring."),
+  useLenientScoring: z.boolean().optional().describe("Whether to use extremely lenient scoring for decent answers."),
 });
 export type AnalyzeSJTResponseInput = z.infer<typeof AnalyzeSJTResponseInputSchema>;
 
 const AnalyzeSJTResponseOutputSchema = z.object({
   score: z.number().min(0).max(10).describe('A score from 0 to 10 evaluating the candidate on the specified competency.'),
   rationale: z.string().describe('A detailed rationale explaining the score, referencing the best and worst response criteria.'),
-  // Enhanced content-based analysis (backward compatible - optional fields)
-  strengthsObserved: z.array(z.string()).optional().describe('Specific competency-related behaviors or approaches that the candidate demonstrated well'),
-  weaknessesObserved: z.array(z.string()).optional().describe('Specific competency-related areas where the candidate could improve'),
-  competencyEvidence: z.string().optional().describe('Direct evidence from the response that demonstrates the assessed competency level'),
+  strengthFeedback: z.string().optional().describe('Specific positive feedback highlighting what the candidate did well.'),
+  developmentFeedback: z.string().optional().describe('Constructive feedback for improvement areas.'),
 });
 export type AnalyzeSJTResponseOutput = z.infer<typeof AnalyzeSJTResponseOutputSchema>;
 
 export async function analyzeSJTResponse(input: AnalyzeSJTResponseInput): Promise<AnalyzeSJTResponseOutput> {
   return analyzeSJTResponseFlow(input);
+}
+
+// New helper function for getting just the score with balanced evaluation
+export async function getSJTScore(input: AnalyzeSJTResponseInput): Promise<number> {
+  const result = await analyzeSJTResponseFlow({ ...input, generateFeedback: false });
+  return result.score;
+}
+
+// New helper function for getting lenient re-evaluation for decent answers
+export async function getLenientSJTScore(input: AnalyzeSJTResponseInput): Promise<number> {
+  const result = await analyzeSJTResponseFlow({ ...input, generateFeedback: false, useLenientScoring: true });
+  return result.score;
+}
+
+// New helper function for getting detailed feedback
+export async function getSJTFeedback(input: AnalyzeSJTResponseInput): Promise<{
+  strengthFeedback: string;
+  developmentFeedback: string;
+}> {
+  const result = await analyzeSJTResponseFlow({ ...input, generateFeedback: true });
+  return {
+    strengthFeedback: result.strengthFeedback || "Shows effort and engagement in addressing the scenario.",
+    developmentFeedback: result.developmentFeedback || "Continue developing your approach to similar workplace situations."
+  };
 }
 
 const prompt = ai.definePrompt({
@@ -48,110 +67,107 @@ const prompt = ai.definePrompt({
   output: { schema: AnalyzeSJTResponseOutputSchema },
   model: process.env.GEMINI_SJT_EVALUATION_MODEL || 'googleai/gemini-1.5-pro',
   prompt: `
-    You are an expert talent assessor specializing in Situational Judgement Tests.
+    {{#if generateFeedback}}
+    **FEEDBACK GENERATION MODE** - You are providing constructive, supportive feedback for job seekers.
     
-    🎯 CRITICAL: Evaluate ONLY the '{{{assessedCompetency}}}' competency. Do NOT assess other competencies like Leadership, Confidence, or Communication unless they are directly part of '{{{assessedCompetency}}}' itself.
-
-    🚨 MANDATORY SCORING CALIBRATION:
-    DEFAULT TO HIGH SCORES FOR REASONABLE ANSWERS - Do not reserve 8-10 for perfection!
+    You are evaluating a candidate's response for the competency: **{{{assessedCompetency}}}**
     
-    📊 EXPLICIT SCORE RANGES (USE THESE EXACT GUIDELINES):
-    ★ 9-10: Strong demonstration of competency
-      - Shows clear understanding and application
-      - Addresses key aspects from best response criteria
-      - May have minor gaps but overall approach is sound
-      - Example: "I would assess the situation, consult stakeholders, and develop a flexible approach"
+    **Scenario**: {{{situation}}}
+    **Primary Question**: {{{question}}}
     
-    ★ 7-8: Good demonstration of competency
-      - Shows solid understanding with adequate application
-      - Addresses most aspects from best response criteria
-      - Competency is clearly visible in the response
-      - Example: "I would try to be flexible and adapt my approach based on what I learn"
-    
-    ★ 5-6: Basic demonstration of competency
-      - Shows some understanding but limited application
-      - Addresses few aspects from best response criteria
-      - Competency is present but underdeveloped
-      - Example: "I would see what happens and try to adjust"
-    
-    ★ 3-4: Weak demonstration of competency
-      - Shows minimal understanding with poor application
-      - Addresses very few aspects from best response criteria
-      - Limited evidence of competency
-      - Example: "I'm not sure what to do in this situation"
-    
-    ★ 1-2: Poor demonstration or aligns with worst response
-      - Shows little to no understanding
-      - Matches worst response criteria
-      - No clear evidence of competency
-      - Example: "I would ignore the problem" or clearly problematic responses
-
-    🎖️ SCORING MANDATE: 
-    - If the answer shows ANY reasonable attempt at demonstrating the competency, score 7 or higher
-    - Only score below 7 if the response is clearly inadequate or matches worst response criteria
-    - Remember: Good answers should get 8-10, not 5-6!
-
-    SCENARIO CONTEXT:
-    - **Situation**: {{{situation}}}
-    
-    {{#if hasMultipleResponses}}
-    📋 **COMPLETE CONVERSATION THREAD** (Original + Follow-ups):
-    {{#each conversationThread}}
-    {{#if this.isFollowUp}}
-    🔄 **Follow-up**: {{{this.question}}}
+    {{#if conversationContext}}
+    **Complete Conversation**:
+    {{{conversationContext}}}
     {{else}}
-    🎯 **Original Question**: {{{this.question}}}
+    **Candidate's Answer**: "{{{candidateAnswer}}}"
     {{/if}}
-    💭 **Candidate Response**: "{{{this.answer}}}"
     
-    {{/each}}
+    **CONSTRUCTIVE FEEDBACK INSTRUCTIONS:**
     
-    ⚠️ IMPORTANT: This scenario had multiple follow-up questions. Evaluate the COMPLETE conversation thread as one holistic response that demonstrates the candidate's full thinking process for '{{{assessedCompetency}}}'. Consider how their understanding developed across the conversation. Give credit for improvement and learning shown across the conversation.
+    Generate supportive, development-focused feedback that helps job seekers improve. Focus on:
+    1. **What they did well** (always find positives)
+    2. **How they can enhance their approach** (constructive suggestions)
+    
+    Be encouraging and specific. These are people seeking employment who need confidence-building feedback.
+    
+    **IMPORTANT: Keep all feedback concise - maximum 3-4 lines each.**
+    
+    **strengthFeedback**: Highlight specific positive aspects of their response that demonstrate {{{assessedCompetency}}}. Always find something positive. Keep to 3-4 lines maximum.
+    
+    **developmentFeedback**: Provide gentle, actionable suggestions for improvement without harsh criticism. Frame as "enhancement opportunities." Keep to 3-4 lines maximum.
+    
+    **rationale**: Brief supportive explanation focusing on growth potential.
+    
+    **score**: Set to 8 (we'll calculate the actual score separately for supportive feedback).
     
     {{else}}
-    - **Question**: {{{question}}}
-    - **Candidate Answer**: "{{{candidateAnswer}}}"
-    {{/if}}
-
-    🎯 COMPETENCY-SPECIFIC EVALUATION for '{{{assessedCompetency}}}':
-    - The **best response** would align with this rationale: "{{{bestResponseRationale}}}"
-    - The **worst response** would align with this rationale: "{{{worstResponseRationale}}}"
-
-    ⚠️ STRICT COMPETENCY FOCUS:
-    - Focus EXCLUSIVELY on how the response(s) demonstrate '{{{assessedCompetency}}}'
-    - Ignore other positive qualities unless directly relevant to '{{{assessedCompetency}}}'
-    - If assessing "Problem Solving", ignore Leadership qualities unless they contribute to problem-solving approach
-    - If assessing "Technical Skills", ignore communication style unless it affects technical explanation
-    - If assessing "Adaptability", ignore enthusiasm/positivity unless it demonstrates adaptive behavior
-
-    🚨 WEAKNESS IDENTIFICATION CRITERIA:
-    - Only identify weaknesses that DIRECTLY relate to the assessed competency '{{{assessedCompetency}}}'
-    - Only flag behaviors that align with the "worst response" rationale provided
-    - DO NOT include general observations or neutral behaviors as weaknesses
-    - If response shows adequate competency, leave weaknessesObserved empty or minimal
-    - Focus on what's missing from the competency demonstration, not general critiques
-
-    🎖️ ENHANCED LENIENT SCORING APPROACH:
-    - Be generous and lenient in your scoring - candidates may not have perfect answers
-    - Give credit for partial understanding and effort toward the competency
-    - Consider the candidate's intent and approach, even if execution isn't flawless
-    - Score based on demonstration of the competency, not perfection
-    - REMEMBER: Use the score ranges above - reasonable answers should score 7-10!
-
-    {{#if hasMultipleResponses}}
-    Score the COMBINED conversation (0-10) for how well it demonstrates '{{{assessedCompetency}}}' competency. Use the scoring calibration above - if they show reasonable competency across the conversation, score 7-10. Be appropriately lenient as this represents a complete thought process across multiple exchanges where understanding may develop progressively.
+    **LENIENT SCORING MODE** - You are providing supportive scoring for job seekers.
+    
+    You are evaluating a candidate's response for the competency: **{{{assessedCompetency}}}**
+    
+    **Scenario**: {{{situation}}}
+    **Primary Question**: {{{question}}}
+    
+    {{#if conversationContext}}
+    **Complete Conversation Context**:
+    {{{conversationContext}}}
     {{else}}
-    Score the single response (0-10) for how well it demonstrates '{{{assessedCompetency}}}' competency. Use the scoring calibration above - if they show reasonable competency, score 7-10. Be lenient as candidates may not provide perfect responses.
+    **Candidate's Answer**: "{{{candidateAnswer}}}"
     {{/if}}
-
-    📋 ANALYSIS REQUIREMENTS:
-    1. **score**: Rate 0-10 using the calibration above (DEFAULT TO HIGH SCORES FOR REASONABLE ANSWERS)
-    2. **rationale**: 2-line focused explanation of how response demonstrates '{{{assessedCompetency}}}'
-    3. **strengthsObserved**: List ONLY behaviors that directly demonstrate '{{{assessedCompetency}}}' competency well
-    4. **weaknessesObserved**: List ONLY behaviors that align with "worst response" criteria for '{{{assessedCompetency}}}' - leave empty if competency is adequately demonstrated
-    5. **competencyEvidence**: Quote specific parts that demonstrate '{{{assessedCompetency}}}' level
-
-    🎯 CRITICAL: Every output field must relate ONLY to '{{{assessedCompetency}}}' competency. Ignore all other aspects of the response.
+    
+    **BEST Response for {{{assessedCompetency}}}**: {{{bestResponseRationale}}}
+    **WORST Response for {{{assessedCompetency}}}**: {{{worstResponseRationale}}}
+    
+    **BALANCED SUPPORTIVE SCORING INSTRUCTIONS:**
+    
+    These are job seekers who need encouragement, but scoring must reflect actual competency demonstration:
+    
+    **If response clearly aligns with best practices:**
+    - **9-10/10**: Strong alignment with best response approach, demonstrates clear understanding of {{{assessedCompetency}}}
+    - **8-9/10**: Good demonstration of competency with solid elements that match best practices
+    
+    **If response shows partial understanding:**
+    - **6-7/10**: Some relevant elements present, basic understanding of the competency shown
+    - **5-6/10**: Minimal competency demonstration, shows awareness but lacks depth
+    
+    **If response is irrelevant, random, or contradicts best practices:**
+    - **3-4/10**: Response doesn't address the scenario appropriately or contradicts good practices
+    - **1-2/10**: Completely irrelevant or would cause workplace issues
+    
+    **CRITICAL**: If the response is random, off-topic, or doesn't address the scenario, score 3-4/10 maximum.
+    **Only give 6+ scores to responses that actually demonstrate some level of {{{assessedCompetency}}}**.
+    
+    {{#if hasFollowUps}}
+    **BONUS CONSIDERATION**: Well-thought follow-up answers that enhance the response can add 0.5-1.0 points.
+    {{/if}}
+    
+    **Be supportive in feedback while being honest in scoring. Help them improve by identifying what's missing.**
+    
+    {{#if useLenientScoring}}
+    **EXTREMELY LENIENT RE-EVALUATION MODE** - This answer already showed decent competency (4+) in initial evaluation.
+    
+    **MAXIMUM LENIENCY FOR JOB SEEKER SUPPORT:**
+    Since this response already demonstrated basic competency, we're now applying ULTRA-SUPPORTIVE scoring to help job seekers succeed:
+    
+    **Default scoring for ANY decent answer that reached this stage:**
+    - **9-10/10**: Any response that shows they understood the scenario and tried to provide a reasonable approach
+    - **8-9/10**: Response shows they read the scenario and provided some kind of workplace-appropriate answer
+    - **7-8/10**: Response is relevant to the scenario in any way and shows basic professionalism
+    
+    **ULTRA-GENEROUS MINDSET**: 
+    - If they mentioned ANY relevant workplace concept → 9-10/10
+    - If they showed they understand it's a workplace scenario → 8-9/10  
+    - If their answer is professional and relevant → 8-10/10
+    - If they demonstrated ANY aspect of {{{assessedCompetency}}} → 9-10/10
+    - If they made any effort to address the situation → 8-9/10
+    
+    **Remember**: This is the BOOST phase for job seekers. Be EXTREMELY generous. These answers already passed the quality filter, so focus on encouraging them with high scores.
+    
+    **Highlight strengths first, then gently suggest improvements. Be encouraging about their potential.**
+    {{/if}}
+    
+    Focus on {{{assessedCompetency}}} and provide accurate assessment.
+    {{/if}}
   `,
 });
 

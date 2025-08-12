@@ -28,6 +28,7 @@ export interface ConversationEntry {
   worstResponseRationale?: string;
   assessedCompetency?: string;
   // Follow-up tracking
+  isFollowUp?: boolean; // Flag to indicate if this question is a follow-up
   followUpGenerated?: boolean; // Flag to indicate if follow-up questions were generated for this scenario
 }
 
