@@ -83,7 +83,6 @@ export class PartialSubmissionService {
             data.sessionId,
             data.questionIndex,
             'video',
-            data.candidateName, // 🔒 PASS CANDIDATE NAME for user-named folders
             data.onUploadProgress
           );
           
@@ -98,37 +97,90 @@ export class PartialSubmissionService {
         }
       }
       
+      // Create the basic submission object with required fields first
+      const timestamp = new Date(); // Use the same timestamp for consistency
+      
+      // Validate essential data to avoid undefined/null values
+      const validAnswer = data.questionData.answer || ''; // Prevent null answers
+      const validQuestion = data.questionData.question || ''; 
+      
       const partialSubmission: Omit<PartialSubmission, 'id'> = {
         sessionId: data.sessionId,
         userId: data.userId,
-        candidateId: data.candidateId,
-        candidateName: data.candidateName,
+        candidateId: data.candidateId || data.userId, // Fallback to userId if candidateId is missing
+        candidateName: data.candidateName || 'Anonymous', // Default name if missing
         interviewType: data.interviewType,
         questionIndex: data.questionIndex,
         totalQuestions: data.totalQuestions,
         
-        // Question data
-        question: data.questionData.question,
-        answer: data.questionData.answer,
-        videoDataUri: processedVideoDataUri ?? null, // 🔒 Convert undefined to null for Firestore
-        videoUrl: videoUploadUrl ?? null, // 🔒 NEW FIELD - Storage URL if uploaded
-        preferredAnswer: data.questionData.preferredAnswer ?? null, // 🔒 Convert undefined to null
-        competency: data.questionData.competency ?? null, // 🔒 Convert undefined to null
-        
-        // SJT fields
-        situation: data.questionData.situation ?? null, // 🔒 Convert undefined to null
-        bestResponseRationale: data.questionData.bestResponseRationale ?? null, // 🔒 Convert undefined to null
-        worstResponseRationale: data.questionData.worstResponseRationale ?? null, // 🔒 Convert undefined to null
-        assessedCompetency: data.questionData.assessedCompetency ?? null, // 🔒 Convert undefined to null
+        // Question data - only include required fields with defaults for safety
+        question: validQuestion,
+        answer: validAnswer,
         
         // Metadata
-        timestamp: new Date(),
+        timestamp: timestamp, // Use JavaScript Date for client-side operations
         status: 'saved',
         retryCount: 0,
         isComplete: false,
-        createdAt: serverTimestamp(),
+        createdAt: serverTimestamp(), // Use Firestore serverTimestamp for server-side operations
         updatedAt: serverTimestamp()
       };
+      
+      // Add optional fields only if they have non-null, non-undefined values
+      // This prevents "Function addDoc() called with invalid data. Unsupported field value: undefined" errors
+      
+      if (processedVideoDataUri && processedVideoDataUri !== 'undefined' && processedVideoDataUri !== 'null') {
+        partialSubmission.videoDataUri = processedVideoDataUri;
+      }
+      
+      if (videoUploadUrl && videoUploadUrl !== 'undefined' && videoUploadUrl !== 'null') {
+        partialSubmission.videoUrl = videoUploadUrl;
+      }
+      
+      if (data.questionData.preferredAnswer && 
+          data.questionData.preferredAnswer !== 'undefined' && 
+          data.questionData.preferredAnswer !== 'null') {
+        partialSubmission.preferredAnswer = data.questionData.preferredAnswer;
+      }
+      
+      if (data.questionData.competency && 
+          data.questionData.competency !== 'undefined' && 
+          data.questionData.competency !== 'null') {
+        partialSubmission.competency = data.questionData.competency;
+      }
+      
+      // SJT fields - only add if they exist and are valid
+      if (data.questionData.situation && 
+          data.questionData.situation !== 'undefined' && 
+          data.questionData.situation !== 'null') {
+        partialSubmission.situation = data.questionData.situation;
+      }
+      
+      if (data.questionData.bestResponseRationale && 
+          data.questionData.bestResponseRationale !== 'undefined' && 
+          data.questionData.bestResponseRationale !== 'null') {
+        partialSubmission.bestResponseRationale = data.questionData.bestResponseRationale;
+      }
+      
+      if (data.questionData.worstResponseRationale && 
+          data.questionData.worstResponseRationale !== 'undefined' && 
+          data.questionData.worstResponseRationale !== 'null') {
+        partialSubmission.worstResponseRationale = data.questionData.worstResponseRationale;
+      }
+      
+      if (data.questionData.assessedCompetency && 
+          data.questionData.assessedCompetency !== 'undefined' && 
+          data.questionData.assessedCompetency !== 'null') {
+        partialSubmission.assessedCompetency = data.questionData.assessedCompetency;
+      }
+      
+      // Final validation to ensure we're not sending any undefined or null values to Firestore
+      Object.keys(partialSubmission).forEach(key => {
+        const value = (partialSubmission as any)[key];
+        if (value === undefined || value === null) {
+          delete (partialSubmission as any)[key];
+        }
+      });
       
       const docRef = await addDoc(collection(db, PARTIAL_SUBMISSIONS_COLLECTION), partialSubmission);
       
@@ -158,7 +210,7 @@ export class PartialSubmissionService {
     try {
       console.log('🔍 [PartialSubmission] Checking for incomplete sessions for user:', userId);
       
-      // 🔒 SIMPLIFIED QUERY - Only filter by userId and isComplete to avoid composite index
+      // 🔒 MINIMAL IMPACT FIX: Remove orderBy to avoid composite index requirement
       const q = query(
         collection(db, PARTIAL_SUBMISSIONS_COLLECTION),
         where('userId', '==', userId),
@@ -175,19 +227,173 @@ export class PartialSubmissionService {
       // Group by sessionId to find the most recent incomplete session
       const partialsBySession = new Map<string, PartialSubmission[]>();
       
-      // 🔒 FIXED TIMESTAMP HANDLING - Convert Firestore Timestamp to Date
-      const allPartials = querySnapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          // Convert Firestore Timestamp to Date if needed
-          timestamp: data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp)
-        } as PartialSubmission;
-      });
-      
-      // Client-side sort by timestamp descending
-      const sortedDocs = allPartials.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      // 🔒 MINIMAL IMPACT FIX: Ultra-defensive handling of all possible timestamp formats
+      const sortedDocs = querySnapshot.docs
+        .map(doc => {
+          try {
+            const data = doc.data();
+            
+            // Default to current time for all timestamps
+            let timestamp = new Date();
+            let createdAt = new Date();
+            let updatedAt = new Date();
+            
+            // Try/catch for each timestamp to prevent any possible runtime errors
+            try {
+              // Handle Firestore Timestamp objects (most common case)
+              if (data.timestamp) {
+                if (typeof (data.timestamp as any).toDate === 'function') {
+                  // Firestore Timestamp object
+                  timestamp = (data.timestamp as any).toDate();
+                } else if (data.timestamp instanceof Date) {
+                  // JavaScript Date
+                  timestamp = data.timestamp;
+                } else if (typeof data.timestamp === 'object' && 'seconds' in (data.timestamp as any)) {
+                  // Raw { seconds, nanoseconds } object
+                  timestamp = new Date((data.timestamp as any).seconds * 1000);
+                } else if (typeof data.timestamp === 'number') {
+                  // Unix timestamp (ms)
+                  timestamp = new Date(data.timestamp);
+                } else if (typeof data.timestamp === 'string') {
+                  // ISO date string
+                  timestamp = new Date(data.timestamp);
+                }
+              }
+            } catch (err) {
+              console.warn('⚠️ [PartialSubmission] Error parsing timestamp:', err);
+              // Keep default timestamp
+            }
+            
+            // Same pattern for createdAt with try/catch
+            try {
+              if (data.createdAt) {
+                if (typeof (data.createdAt as any).toDate === 'function') {
+                  createdAt = (data.createdAt as any).toDate();
+                } else if (data.createdAt instanceof Date) {
+                  createdAt = data.createdAt;
+                } else if (typeof data.createdAt === 'object' && 'seconds' in (data.createdAt as any)) {
+                  createdAt = new Date((data.createdAt as any).seconds * 1000);
+                } else if (typeof data.createdAt === 'number') {
+                  createdAt = new Date(data.createdAt);
+                } else if (typeof data.createdAt === 'string') {
+                  createdAt = new Date(data.createdAt);
+                }
+              }
+            } catch (err) {
+              console.warn('⚠️ [PartialSubmission] Error parsing createdAt:', err);
+              // Keep default createdAt
+            }
+            
+            // Same pattern for updatedAt with try/catch
+            try {
+              if (data.updatedAt) {
+                if (typeof (data.updatedAt as any).toDate === 'function') {
+                  updatedAt = (data.updatedAt as any).toDate();
+                } else if (data.updatedAt instanceof Date) {
+                  updatedAt = data.updatedAt;
+                } else if (typeof data.updatedAt === 'object' && 'seconds' in (data.updatedAt as any)) {
+                  updatedAt = new Date((data.updatedAt as any).seconds * 1000);
+                } else if (typeof data.updatedAt === 'number') {
+                  updatedAt = new Date(data.updatedAt);
+                } else if (typeof data.updatedAt === 'string') {
+                  updatedAt = new Date(data.updatedAt);
+                }
+              }
+            } catch (err) {
+              console.warn('⚠️ [PartialSubmission] Error parsing updatedAt:', err);
+              // Keep default updatedAt
+            }
+            
+            // Create a clean object with proper Date objects
+            return {
+              id: doc.id,
+              ...data,
+              timestamp: timestamp,
+              createdAt: createdAt,
+              updatedAt: updatedAt
+            } as PartialSubmission;
+          } catch (err) {
+            // If anything goes wrong, create a minimal valid object with default values
+            console.error('❌ [PartialSubmission] Critical error processing document:', err);
+            return {
+              id: doc.id,
+              sessionId: '',
+              userId: '',
+              candidateId: '',
+              candidateName: 'Error',
+              interviewType: 'SJT',
+              questionIndex: 0,
+              totalQuestions: 0,
+              question: '',
+              answer: '',
+              timestamp: new Date(),
+              status: 'error',
+              retryCount: 0,
+              isComplete: true,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            } as PartialSubmission;
+          }
+        })
+        .sort((a, b) => {
+          try {
+            // Handle every possible timestamp case individually to avoid any type errors
+            let timeA = 0;
+            let timeB = 0;
+            
+            // Extra defensive check for a.timestamp
+            if (a && a.timestamp) {
+              if (a.timestamp instanceof Date) {
+                // Standard JavaScript Date object
+                try { timeA = a.timestamp.getTime(); } catch { timeA = 0; }
+              } else if (typeof (a.timestamp as any).toDate === 'function') {
+                // Firestore Timestamp object
+                try { 
+                  const dateA = (a.timestamp as any).toDate();
+                  timeA = dateA.getTime(); 
+                } catch { timeA = 0; }
+              } else if (typeof a.timestamp === 'object' && 'seconds' in (a.timestamp as any)) {
+                // Raw Firestore timestamp object with seconds
+                try { timeA = (a.timestamp as any).seconds * 1000; } catch { timeA = 0; }
+              } else if (typeof a.timestamp === 'number') {
+                // Numeric timestamp (milliseconds since epoch)
+                timeA = a.timestamp;
+              }
+              // All other cases default to 0
+            }
+            
+            // Same defensive check for b.timestamp
+            if (b && b.timestamp) {
+              if (b.timestamp instanceof Date) {
+                // Standard JavaScript Date object
+                try { timeB = b.timestamp.getTime(); } catch { timeB = 0; }
+              } else if (typeof (b.timestamp as any).toDate === 'function') {
+                // Firestore Timestamp object
+                try { 
+                  const dateB = (b.timestamp as any).toDate();
+                  timeB = dateB.getTime(); 
+                } catch { timeB = 0; }
+              } else if (typeof b.timestamp === 'object' && 'seconds' in (b.timestamp as any)) {
+                // Raw Firestore timestamp object with seconds
+                try { timeB = (b.timestamp as any).seconds * 1000; } catch { timeB = 0; }
+              } else if (typeof b.timestamp === 'number') {
+                // Numeric timestamp (milliseconds since epoch)
+                timeB = b.timestamp;
+              }
+              // All other cases default to 0
+            }
+            
+            // If we couldn't extract timestamps, try comparing by question index as fallback
+            if (timeA === 0 && timeB === 0) {
+              return (a.questionIndex || 0) - (b.questionIndex || 0);
+            }
+            
+            return timeB - timeA; // Sort descending
+          } catch (err) {
+            console.warn('⚠️ [PartialSubmission] Error in sort comparison:', err);
+            return 0; // Return equal if comparison fails
+          }
+        });
       
       sortedDocs.forEach(partial => {
         const sessionId = partial.sessionId;
@@ -203,10 +409,60 @@ export class PartialSubmissionService {
       let mostRecentTime = new Date(0);
       
       for (const [sessionId, partials] of partialsBySession) {
-        const sessionTime = new Date(Math.max(...partials.map(p => p.timestamp.getTime())));
-        if (sessionTime > mostRecentTime) {
-          mostRecentTime = sessionTime;
-          mostRecentSession = { sessionId, partials };
+        try {
+          // Ultra-safe timestamp extraction with multiple fallbacks
+          const validTimestamps = partials
+            .map(p => {
+              try {
+                // First check if it's already a proper Date object
+                if (p.timestamp instanceof Date) {
+                  return p.timestamp.getTime();
+                } 
+                
+                // Handle different timestamp formats with type assertions for safety
+                const rawTimestamp = p.timestamp as any;
+                
+                // Check for Firestore Timestamp with toDate method
+                if (rawTimestamp && typeof rawTimestamp.toDate === 'function') {
+                  return rawTimestamp.toDate().getTime();
+                }
+                
+                // Check for raw Firestore timestamp object { seconds, nanoseconds }
+                if (rawTimestamp && typeof rawTimestamp === 'object' && 'seconds' in rawTimestamp) {
+                  return rawTimestamp.seconds * 1000;
+                }
+                
+                // Try createdAt as fallback
+                if (p.createdAt instanceof Date) {
+                  return p.createdAt.getTime();
+                } else if (p.createdAt) {
+                  const rawCreatedAt = p.createdAt as any;
+                  if (typeof rawCreatedAt.toDate === 'function') {
+                    return rawCreatedAt.toDate().getTime();
+                  }
+                }
+                
+                // Last resort - use current time
+                return 0;
+              } catch (err) {
+                console.warn('⚠️ [PartialSubmission] Error extracting timestamp:', err);
+                return 0;
+              }
+            })
+            .filter(time => time > 0);
+          
+          // Use the most recent timestamp or current time if no valid timestamps
+          const sessionTime = validTimestamps.length > 0 
+            ? new Date(Math.max(...validTimestamps))
+            : new Date();
+            
+          if (sessionTime > mostRecentTime) {
+            mostRecentTime = sessionTime;
+            mostRecentSession = { sessionId, partials };
+          }
+        } catch (err) {
+          console.warn(`⚠️ [PartialSubmission] Error processing timestamps for session ${sessionId}:`, err);
+          // Continue with next session
         }
       }
       
@@ -221,16 +477,104 @@ export class PartialSubmissionService {
       const hoursSinceLastActivity = (Date.now() - mostRecentTime.getTime()) / (1000 * 60 * 60);
       const canResume = hoursSinceLastActivity < 24;
       
+      // Safely extract valid question indices
+      const questionIndices = partials.map(p => p.questionIndex);
+      const lastQuestionIndex = questionIndices.length > 0 ? Math.max(...questionIndices) : 0;
+      
+      // Safely extract valid timestamps for start time calculation with extensive error handling
+      const validTimestamps = partials
+        .map(p => {
+          try {
+            // Multiple timestamp extraction strategies with individual try/catch blocks
+            
+            // Case 1: Standard JS Date
+            if (p.timestamp instanceof Date) {
+              try {
+                return p.timestamp.getTime();
+              } catch {
+                // Fallback if getTime() fails
+              }
+            }
+            
+            // Case 2: Firestore Timestamp
+            if (p.timestamp && typeof (p.timestamp as any).toDate === 'function') {
+              try {
+                const date = (p.timestamp as any).toDate();
+                if (date instanceof Date) {
+                  return date.getTime();
+                }
+              } catch {
+                // Continue to next strategy
+              }
+            }
+            
+            // Case 3: Raw seconds/nanoseconds object
+            if (p.timestamp && typeof p.timestamp === 'object' && 'seconds' in (p.timestamp as any)) {
+              try {
+                return (p.timestamp as any).seconds * 1000;
+              } catch {
+                // Continue to next strategy
+              }
+            }
+            
+            // Case 4: Fallback to created timestamp
+            if (p.createdAt instanceof Date) {
+              try {
+                return p.createdAt.getTime();
+              } catch {
+                // Continue to last resort
+              }
+            }
+            
+            // Case 5: Check for Firestore timestamp in createdAt
+            if (p.createdAt && typeof (p.createdAt as any).toDate === 'function') {
+              try {
+                const date = (p.createdAt as any).toDate();
+                if (date instanceof Date) {
+                  return date.getTime();
+                }
+              } catch {
+                // Last resort is 0
+              }
+            }
+            
+            // Last resort: Return current time to avoid sorting issues
+            return Date.now();
+          } catch (err) {
+            console.warn('⚠️ [PartialSubmission] Error extracting timestamp:', err);
+            return Date.now(); // Use current time as fallback
+          }
+        })
+        .filter(time => time > 0);
+      
+      const startedAt = validTimestamps.length > 0 
+        ? new Date(Math.min(...validTimestamps)) 
+        : new Date();
+      
+      // Create sorted array with defensive comparisons
+      const sortedPartials = [...partials];
+      try {
+        sortedPartials.sort((a, b) => {
+          // Default to 0 for missing indices
+          const indexA = typeof a.questionIndex === 'number' ? a.questionIndex : 0;
+          const indexB = typeof b.questionIndex === 'number' ? b.questionIndex : 0;
+          return indexA - indexB;
+        });
+      } catch (err) {
+        console.warn('⚠️ [PartialSubmission] Error sorting by question index:', err);
+        // Keep original order if sorting fails
+      }
+      
       const recovery: SessionRecovery = {
         sessionId,
         candidateName: firstPartial.candidateName,
         interviewType: firstPartial.interviewType,
         totalQuestions: firstPartial.totalQuestions,
         completedQuestions: partials.length,
-        lastQuestionIndex: Math.max(...partials.map(p => p.questionIndex)),
+        lastQuestionIndex,
         canResume,
-        partialSubmissions: partials.sort((a, b) => a.questionIndex - b.questionIndex),
-        startedAt: new Date(Math.min(...partials.map(p => p.timestamp.getTime()))),
+        partialSubmissions: sortedPartials,
+        startedAt,
         lastActivityAt: mostRecentTime
       };
       
@@ -254,10 +598,13 @@ export class PartialSubmissionService {
    */
   async getSessionProgress(sessionId: string): Promise<ProgressInfo | null> {
     try {
-      // 🔒 SIMPLIFIED QUERY - Avoid composite index requirement  
+      console.log(`🔍 [PartialSubmission] Getting progress for session: ${sessionId}`);
+      
+      // 🔒 MINIMAL IMPACT FIX: Simple query without orderBy to avoid composite index requirement
       const q = query(
         collection(db, PARTIAL_SUBMISSIONS_COLLECTION),
         where('sessionId', '==', sessionId)
+        // No orderBy - we'll sort on the client side
       );
       
       const querySnapshot = await getDocs(q);
@@ -266,18 +613,50 @@ export class PartialSubmissionService {
         return null;
       }
       
-      // 🔒 FIXED TIMESTAMP HANDLING - Convert Firestore Timestamp to Date
       const partials = querySnapshot.docs.map(doc => {
         const data = doc.data();
+        let timestamp = new Date();
+        let createdAt = new Date();
+        let updatedAt = new Date();
+        
+        // Handle Firestore Timestamp objects (most common case)
+        if (data.timestamp && typeof data.timestamp.toDate === 'function') {
+          timestamp = data.timestamp.toDate();
+        } else if (data.timestamp instanceof Date) {
+          timestamp = data.timestamp;
+        } else if (data.timestamp && typeof data.timestamp === 'object' && 'seconds' in data.timestamp) {
+          // Handle server timestamp that might be in { seconds: X, nanoseconds: Y } format
+          timestamp = new Date(data.timestamp.seconds * 1000);
+        }
+        
+        // Same pattern for createdAt
+        if (data.createdAt && typeof data.createdAt.toDate === 'function') {
+          createdAt = data.createdAt.toDate();
+        } else if (data.createdAt instanceof Date) {
+          createdAt = data.createdAt;
+        } else if (data.createdAt && typeof data.createdAt === 'object' && 'seconds' in data.createdAt) {
+          createdAt = new Date(data.createdAt.seconds * 1000);
+        }
+        
+        // Same pattern for updatedAt
+        if (data.updatedAt && typeof data.updatedAt.toDate === 'function') {
+          updatedAt = data.updatedAt.toDate();
+        } else if (data.updatedAt instanceof Date) {
+          updatedAt = data.updatedAt;
+        } else if (data.updatedAt && typeof data.updatedAt === 'object' && 'seconds' in data.updatedAt) {
+          updatedAt = new Date(data.updatedAt.seconds * 1000);
+        }
+        
         return {
           id: doc.id,
           ...data,
-          // Convert Firestore Timestamp to Date if needed
-          timestamp: data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp)
+          timestamp: timestamp,
+          createdAt: createdAt,
+          updatedAt: updatedAt
         } as PartialSubmission;
       });
       
-      // Client-side sort by questionIndex
+      // Sort on client side instead of using orderBy in the query
       partials.sort((a, b) => a.questionIndex - b.questionIndex);
       
       const firstPartial = partials[0];
@@ -338,17 +717,58 @@ export class PartialSubmissionService {
       // Delete sessions older than 7 days
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
       
-      const q = query(
-        collection(db, PARTIAL_SUBMISSIONS_COLLECTION),
-        where('timestamp', '<', Timestamp.fromDate(sevenDaysAgo))
+      // First, get all sessions and filter on client-side for safety
+      const allSessionsQuery = query(
+        collection(db, PARTIAL_SUBMISSIONS_COLLECTION)
       );
       
-      const querySnapshot = await getDocs(q);
+      const querySnapshot = await getDocs(allSessionsQuery);
       
-      const deletePromises = querySnapshot.docs.map(doc => deleteDoc(doc.ref));
+      // Filter expired sessions manually to avoid timestamp conversion issues
+      const expiredDocs = querySnapshot.docs.filter(doc => {
+        try {
+          const data = doc.data();
+          let timestamp: Date | null = null;
+          
+          // Handle all possible timestamp formats with type assertions
+          const rawTimestamp = data.timestamp as any;
+          const rawCreatedAt = data.createdAt as any;
+          
+          // Try timestamp first in various formats
+          if (rawTimestamp) {
+            if (rawTimestamp instanceof Date) {
+              timestamp = rawTimestamp;
+            } else if (typeof rawTimestamp.toDate === 'function') {
+              timestamp = rawTimestamp.toDate();
+            } else if (typeof rawTimestamp === 'object' && 'seconds' in rawTimestamp) {
+              timestamp = new Date(rawTimestamp.seconds * 1000);
+            }
+          }
+          
+          // Fall back to createdAt if timestamp is invalid
+          if (!timestamp && rawCreatedAt) {
+            if (rawCreatedAt instanceof Date) {
+              timestamp = rawCreatedAt;
+            } else if (typeof rawCreatedAt.toDate === 'function') {
+              timestamp = rawCreatedAt.toDate();
+            } else if (typeof rawCreatedAt === 'object' && 'seconds' in rawCreatedAt) {
+              timestamp = new Date(rawCreatedAt.seconds * 1000);
+            }
+          }
+          
+          // Consider session expired if timestamp is valid and older than 7 days
+          return timestamp && timestamp < sevenDaysAgo;
+        } catch (err) {
+          console.warn('⚠️ [PartialSubmission] Error checking expired session:', err);
+          return false;
+        }
+      });
+      
+      // Delete expired sessions
+      const deletePromises = expiredDocs.map(doc => deleteDoc(doc.ref));
       await Promise.all(deletePromises);
       
-      console.log(`✅ [PartialSubmission] Cleaned up ${querySnapshot.size} expired sessions`);
+      console.log(`✅ [PartialSubmission] Cleaned up ${deletePromises.length} expired sessions`);
     } catch (error) {
       console.error('❌ [PartialSubmission] Error cleaning up expired sessions:', error);
     }
@@ -370,7 +790,6 @@ export class PartialSubmissionService {
     sessionId: string,
     questionIndex: number,
     mediaType: 'video' | 'audio',
-    candidateName?: string, // 🔒 NEW PARAMETER for user-named folders
     onProgress?: (progress: number, type: 'video' | 'audio') => void
   ): Promise<{ uploaded: boolean; url?: string }> {
     try {
@@ -389,13 +808,12 @@ export class PartialSubmissionService {
       // Report progress start
       onProgress?.(0, mediaType);
       
-      // 🔒 CONSISTENT FOLDER STRUCTURE - Use partials prefix to distinguish from final submissions
+      // Upload to Firebase Storage using the same method as auth-context
       const downloadURL = await mediaStorage.uploadMediaToStorage(
         blob, 
-        `partials_${sessionId}`, // Use partials prefix with sessionId for consistent structure
+        sessionId, // Use sessionId instead of temp submission ID
         questionIndex, 
-        mediaType,
-        candidateName // Maintained for backward compatibility
+        mediaType
       );
       
       // Report progress complete
