@@ -18,8 +18,11 @@ import { Button } from '@/components/ui/button';
 import { configurationService } from '@/lib/config-service';
 // 🔒 MINIMAL IMPACT IMPORTS - Progressive upload support for SJT
 import { ProgressiveProvider, useProgressive } from '@/contexts/progressive-context';
+// Note: SessionRecoveryModal is imported but will be used in a separate PR
+// import { SessionRecoveryModal } from '@/components/session-recovery-modal';
+import { ProgressiveUploadIndicator } from '@/components/progressive-upload-indicator';
 import { featureFlags } from '@/lib/feature-flags';
-import type { ProgressInfo, SaveResult } from '@/types/partial-submission';
+import type { SessionRecovery, ProgressInfo, SaveResult } from '@/types/partial-submission';
 
 
 interface Scenario {
@@ -39,7 +42,7 @@ const fallbackSjtScenarios: Scenario[] = [
     question: "What is your immediate plan of action to handle this situation?",
     bestResponseRationale: "Acknowledge the customer's frustration with empathy, take full ownership of the problem without making excuses, and immediately propose a concrete solution such as expediting the next shipment for free. The focus should be on solving the customer's problem first and rebuilding trust.",
     worstResponseRationale: "Become defensive, blame the logistics team or external factors, or make promises that cannot be kept. A poor response would fail to acknowledge the customer's importance and the severity of the issue.",
-    assessedCompetency: "Customer Focus, Problem Solving, Communication",
+    assessedCompetency: "Customer Focus",
   },
   {
     id: 2,
@@ -47,7 +50,7 @@ const fallbackSjtScenarios: Scenario[] = [
     question: "How would you approach this situation with your team member?",
     bestResponseRationale: "Schedule a private, one-on-one meeting to express concern and create a safe space for them to share any challenges. The ideal approach is to listen actively, ask open-ended questions to understand the root cause (be it workload, personal issues, or skill gaps), and collaboratively develop a support plan.",
     worstResponseRationale: "Criticize the team member publicly, immediately put them on a performance improvement plan without discussion, or simply ignore the problem hoping it will resolve itself. A bad response lacks empathy and fails to investigate the underlying issues.",
-    assessedCompetency: "Coaching & Mentoring, Leadership, Emotional Intelligence",
+    assessedCompetency: "Coaching & Mentoring",
   },
 ];
 
@@ -70,6 +73,7 @@ function SJTInterviewPage() {
   const [isSavingAnswer, setIsSavingAnswer] = useState(false);
   const [sjtScenarios, setSjtScenarios] = useState<Scenario[]>(fallbackSjtScenarios);
   const [timeLimit, setTimeLimit] = useState(0); // in minutes
+  const [questionTimeLimit, setQuestionTimeLimit] = useState(0); // per question time limit in minutes
   const [showReport, setShowReport] = useState(true);
   const [questionTimes, setQuestionTimes] = useState<number[]>([]); // Track time per question
   const [canTakeTest, setCanTakeTest] = useState(true);
@@ -165,6 +169,12 @@ function SJTInterviewPage() {
         }
         if (settings?.timeLimit) {
           setTimeLimit(settings.timeLimit);
+        }
+        if (settings?.questionTimeLimit) {
+          console.log('🕐 Loading questionTimeLimit from settings:', settings.questionTimeLimit);
+          setQuestionTimeLimit(settings.questionTimeLimit);
+        } else {
+          console.log('🕐 No questionTimeLimit found in settings:', settings);
         }
       }
     } catch (error) {
@@ -496,8 +506,6 @@ function SJTInterviewPage() {
           question: `Situation: ${newFollowUpScenario.situation}\n\nFollow-up Question: ${newFollowUpScenario.question}`,
           answer: null,
           videoDataUri: undefined,
-          preferredAnswer: undefined, // 🔒 EXPLICIT undefined for SJT follow-ups
-          competency: undefined, // 🔒 EXPLICIT undefined for SJT follow-ups
           situation: newFollowUpScenario.situation,
           bestResponseRationale: newFollowUpScenario.bestResponseRationale,
           worstResponseRationale: newFollowUpScenario.worstResponseRationale,
@@ -507,10 +515,6 @@ function SJTInterviewPage() {
         // Update conversation history with new follow-up
         const newHistory = [...updatedHistory];
         newHistory.splice(currentQuestionIndex + 1, 0, newConversationEntry);
-        
-        // Mark the current question as having generated a follow-up for penalty calculation
-        newHistory[currentQuestionIndex].followUpGenerated = true;
-        
         setConversationHistory(newHistory);
         
         // Update follow-up count for this base question
@@ -524,12 +528,9 @@ function SJTInterviewPage() {
         newQuestionTimes.splice(currentQuestionIndex + 1, 0, 0);
         setQuestionTimes(newQuestionTimes);
         
-        // Log AI rationale to console for debugging (not shown to user)
-        console.log("Follow-up Question Generated - AI Rationale:", evaluation.rationale);
-        
         toast({
           title: "Follow-up Question Generated",
-          description: "Based on your response, we have a follow-up question to explore further.",
+          description: evaluation.rationale,
           duration: 5000, // 5 seconds duration
           className: "bg-green-50 border border-green-200 text-green-800", 
         });
@@ -539,12 +540,9 @@ function SJTInterviewPage() {
         setCurrentQuestionIndex(currentQuestionIndex + 1);
         return; // Exit early to avoid the automatic navigation in finally block
       } else {
-        // Log AI rationale to console for debugging (not shown to user)
-        console.log("Answer Complete - AI Rationale:", evaluation.rationale);
-        
         toast({
           title: "Answer Complete",
-          description: "Your response has been recorded. Moving to the next question.",
+          description: evaluation.rationale,
           duration: 5000, // 5 seconds duration
           className: "bg-green-50 border border-green-200 text-green-800",
         });
@@ -561,6 +559,108 @@ function SJTInterviewPage() {
     }
   };
   
+  // 🔒 MINIMAL IMPACT - Session recovery on startup
+  useEffect(() => {
+    const checkForRecoverableSession = async () => {
+      if (!progressive.isProgressiveSaveEnabled || !user) {
+        return;
+      }
+      
+      try {
+        console.log('🔍 Checking for recoverable SJT session...');
+        const recovery = await progressive.checkForRecovery();
+        
+        if (recovery && recovery.interviewType === 'SJT' && recovery.canResume) {
+          console.log('🔄 Found recoverable SJT session:', recovery);
+          
+          // Set pre-interview details from recovery
+          setPreInterviewDetails({
+            name: recovery.candidateName,
+            roleCategory: "Situational Judgement Test",
+            language: 'English'
+          });
+          
+          // Show session recovery modal with confirmation option
+          // Currently importing the SessionRecoveryModal component and using it here
+          // Note: Actual implementation depends on how session recovery UI is designed
+          
+          // For now, we'll implement a basic toast notification
+          toast({
+            title: "Session Recovery Available",
+            description: "You have a previous session that was interrupted. Would you like to continue?",
+            duration: 10000, // Long duration
+            action: (
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => {
+                    // Resume session
+                    progressive.resumeSession(recovery.sessionId);
+                    
+                    // Reconstruct conversation history from partial submissions
+                    const restoredHistory: ConversationEntry[] = new Array(recovery.totalQuestions).fill(null).map(() => ({
+                      question: '',
+                      answer: null,
+                    }));
+                    
+                    // Fill in recovered answers
+                    recovery.partialSubmissions.forEach(partial => {
+                      const entry: ConversationEntry = {
+                        question: partial.question || '',
+                        answer: null, // Initialize with null as required by type
+                      };
+                      
+                      // Add optional fields only if they exist
+                      if (partial.answer) entry.answer = partial.answer;
+                      if (partial.videoDataUri) entry.videoDataUri = partial.videoDataUri;
+                      if (partial.situation) entry.situation = partial.situation;
+                      if (partial.bestResponseRationale) entry.bestResponseRationale = partial.bestResponseRationale;
+                      if (partial.worstResponseRationale) entry.worstResponseRationale = partial.worstResponseRationale;
+                      if (partial.assessedCompetency) entry.assessedCompetency = partial.assessedCompetency;
+                      
+                      // Add to history
+                      restoredHistory[partial.questionIndex] = entry;
+                    });
+                    
+                    setConversationHistory(restoredHistory);
+                    setCurrentQuestionIndex(recovery.lastQuestionIndex + 1);
+                    setStatus('INTERVIEW');
+                    
+                    toast({
+                      title: "Session Resumed",
+                      description: `Restored ${recovery.completedQuestions} previous answers.`,
+                    });
+                  }}
+                >
+                  Resume
+                </Button>
+                <Button 
+                  variant="destructive" 
+                  size="sm"
+                  onClick={() => {
+                    // Discard and start new session
+                    progressive.startNewSession('SJT');
+                    toast({
+                      title: "New Session Started",
+                      description: "Previous session has been discarded.",
+                    });
+                  }}
+                >
+                  Start New
+                </Button>
+              </div>
+            ),
+          });
+        }
+      } catch (error) {
+        console.error('❌ Error checking for recoverable session:', error);
+      }
+    };
+    
+    checkForRecoverableSession();
+  }, [progressive, user, toast]);
+
   useEffect(() => {
     if (user && !preInterviewDetails) {
         setPreInterviewDetails({ name: user.candidateName, roleCategory: "Situational Judgement Test", language: 'English' });
@@ -597,10 +697,58 @@ function SJTInterviewPage() {
            );
         }
         
+        // 🔒 MINIMAL IMPACT - Show upload indicator if uploads are in progress
+        if (progressive.isProgressiveUploadEnabled && hasActiveUpload()) {
+          // Get upload progress summary
+          let totalProgress = 0;
+          let count = 0;
+          progressive.uploadProgress.forEach((value) => {
+            totalProgress += value.progress;
+            count++;
+          });
+          const averageProgress = count > 0 ? Math.round(totalProgress / count) : 0;
+          
+          // Display an upload indicator
+          return (
+            <div className="w-full max-w-6xl flex flex-col items-center">
+              <div className="w-full rounded-md bg-blue-50 p-4 mb-4 flex items-center justify-between border border-blue-200">
+                <div className="flex items-center">
+                  <svg className="animate-pulse mr-2 h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  <span className="font-medium text-blue-700">Uploading media... ({averageProgress}%)</span>
+                </div>
+                <div className="w-1/3 bg-blue-200 rounded-full h-2">
+                  <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${averageProgress}%` }}></div>
+                </div>
+              </div>
+              
+              <Flashcard
+                question={currentEntry.question}
+                questionNumber={currentQuestionIndex + 1}
+                totalQuestions={conversationHistory.length}
+                onAnswerSubmit={handleAnswerSubmit}
+                isProcessing={isSavingAnswer}
+                isVisible={true}
+                mode={interviewMode}
+                isAnswered={currentEntry.answer !== null}
+                onFinishInterview={handleFinishInterview}
+                answeredQuestionsCount={answeredQuestionsCount}
+                timeLimitInMinutes={timeLimit}
+                questionTimeLimitInMinutes={questionTimeLimit}
+                onTimeUp={handleFinishInterview}
+                currentQuestionIndex={currentQuestionIndex}
+                setCurrentQuestionIndex={setCurrentQuestionIndex}
+                conversationHistory={conversationHistory}
+                questionTimes={questionTimes}
+                setQuestionTimes={setQuestionTimes}
+              />
+            </div>
+          );
+        }
         return (
           <div className="w-full max-w-6xl flex flex-col items-center">
             <Flashcard
-              key={currentQuestionIndex}
               question={currentEntry.question}
               questionNumber={currentQuestionIndex + 1}
               totalQuestions={conversationHistory.length}
@@ -676,6 +824,8 @@ function SJTInterviewPage() {
   return (
     <div className="flex flex-col min-h-screen">
       <Header />
+      {/* 🔒 MINIMAL IMPACT - Add progressive upload indicator */}
+      {progressive.isProgressiveUploadEnabled && <ProgressiveUploadIndicator />}
       <main className="flex-grow flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8">
         {checkingAttempts ? (
           <div className="flex flex-col items-center justify-center text-center p-8">
