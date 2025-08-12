@@ -4,7 +4,7 @@
 
 ### 1. Genkit AI Framework Integration
 
-#### Core Configuration (`src/ai/genkit.ts`):
+#### Core Configuration (`src/ai/genkit.ts`)::
 ```typescript
 import {genkit} from 'genkit';
 import {googleAI} from '@genkit-ai/googleai';
