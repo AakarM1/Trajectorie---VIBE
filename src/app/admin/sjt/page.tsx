@@ -137,7 +137,7 @@ const SJTConfigPage = () => {
                     </CardHeader>
                     <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                         <div className="space-y-2">
-                            <Label htmlFor="time-limit" className="flex items-center gap-2"><Clock /> Time Limit (minutes)</Label>
+                            <Label htmlFor="time-limit" className="flex items-center gap-2"><Clock /> Total Test Time (minutes)</Label>
                             <Input
                                 id="time-limit"
                                 type="number"
@@ -145,7 +145,18 @@ const SJTConfigPage = () => {
                                 onChange={(e) => setSettings(s => ({ ...s, timeLimit: parseInt(e.target.value, 10) || 0 }))}
                                 placeholder="0 for no limit"
                             />
-                            <p className="text-xs text-muted-foreground">Set to 0 for no time limit.</p>
+                            <p className="text-xs text-muted-foreground">Overall test time limit. Set to 0 for no limit.</p>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="question-time-limit" className="flex items-center gap-2"><Clock /> Per Question Time (minutes)</Label>
+                            <Input
+                                id="question-time-limit"
+                                type="number"
+                                value={settings.questionTimeLimit || 0}
+                                onChange={(e) => setSettings(s => ({ ...s, questionTimeLimit: parseInt(e.target.value, 10) || 0 }))}
+                                placeholder="e.g., 2 for 2 minutes"
+                            />
+                            <p className="text-xs text-muted-foreground">Time limit per question. Set to 0 for no limit. Auto-submits when time expires.</p>
                         </div>
                          <div className="space-y-2">
                             <Label htmlFor="questions-number" className="flex items-center gap-2"><ListOrdered /> Number of Questions</Label>

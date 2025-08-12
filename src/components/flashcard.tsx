@@ -27,6 +27,7 @@ interface FlashcardProps {
   onFinishInterview: () => void;
   answeredQuestionsCount: number;
   timeLimitInMinutes: number;
+  questionTimeLimitInMinutes?: number; // NEW: Per-question time limit
   onTimeUp: () => void;
   currentQuestionIndex: number;
   setCurrentQuestionIndex: (index: number) => void;
@@ -54,6 +55,7 @@ const Flashcard: React.FC<FlashcardProps> = ({
   isAnswered,
   onFinishInterview,
   timeLimitInMinutes,
+  questionTimeLimitInMinutes = 0, // NEW: Default to 0 (no limit)
   onTimeUp,
   currentQuestionIndex,
   setCurrentQuestionIndex,
@@ -61,6 +63,11 @@ const Flashcard: React.FC<FlashcardProps> = ({
   questionTimes,
   setQuestionTimes
 }) => {
+  // Debug: Log the per-question timer value
+  console.log('🕐 Flashcard received questionTimeLimitInMinutes:', questionTimeLimitInMinutes);
+  
+  // Get timer value from props or use default for testing
+  const testTimerValue = questionTimeLimitInMinutes || 2;
   const [isRecording, setIsRecording] = useState(false);
   const [mediaData, setMediaData] = useState<{ blob: Blob; dataUri: string } | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -73,22 +80,20 @@ const Flashcard: React.FC<FlashcardProps> = ({
   const { toast } = useToast();
   
   const [testTimeElapsed, setTestTimeElapsed] = useState(0); // Track elapsed time in seconds
-  const [currentQuestionTime, setCurrentQuestionTime] = useState(0); // Current question timer
+  const [questionTimeRemaining, setQuestionTimeRemaining] = useState(0); // Countdown timer for current question
 
-  const questionTimerRef = useRef<NodeJS.Timeout>();
   const testTimerRef = useRef<NodeJS.Timeout>();
-  const questionTimesRef = useRef<number[]>(questionTimes); // Use ref to avoid state update conflicts
+  const questionCountdownRef = useRef<NodeJS.Timeout>(); // Countdown timer ref
 
 
-  // Keep ref in sync with props
-  useEffect(() => {
-    questionTimesRef.current = questionTimes;
-  }, [questionTimes]);
+  // Keep ref in sync with props - REMOVED since we don't use question times anymore
 
   // Start test timer (stopwatch) when component mounts - ONLY ONCE
   useEffect(() => {
     // Start stopwatch - counts UP from 0, only if not already started
-    if (testTimerRef.current) return; // Don't restart if already running
+    if (testTimerRef.current) {
+      return; // Don't restart if already running
+    }
     
     testTimerRef.current = setInterval(() => {
       setTestTimeElapsed(prevTime => prevTime + 1);
@@ -121,28 +126,52 @@ const Flashcard: React.FC<FlashcardProps> = ({
 
 
   useEffect(() => {
-    // Handle question timer when changing questions
+    // Handle countdown timer when changing questions
     if (isAnswered) {
-      // If question is already answered, show the frozen time and stop timer
-      setCurrentQuestionTime(questionTimes[currentQuestionIndex] || 0);
-      if (questionTimerRef.current) {
-        clearInterval(questionTimerRef.current);
-        questionTimerRef.current = undefined;
+      // If question is already answered, stop countdown timer
+      if (questionCountdownRef.current) {
+        clearInterval(questionCountdownRef.current);
+        questionCountdownRef.current = undefined;
       }
     } else {
-      // For unanswered questions, start from saved time or 0
-      const savedTime = questionTimes[currentQuestionIndex] || 0;
-      setCurrentQuestionTime(savedTime);
-      
-      // Clear existing timer
-      if (questionTimerRef.current) {
-        clearInterval(questionTimerRef.current);
+      // Clear existing countdown timer
+      if (questionCountdownRef.current) {
+        clearInterval(questionCountdownRef.current);
       }
-      
-      // Start new timer
-      questionTimerRef.current = setInterval(() => {
-        setCurrentQuestionTime(prev => prev + 1);
-      }, 1000);
+
+      // Start countdown timer if per-question limit is configured
+      if (testTimerValue && testTimerValue > 0) {
+        const totalSeconds = testTimerValue * 60;
+        setQuestionTimeRemaining(totalSeconds);
+        
+        questionCountdownRef.current = setInterval(() => {
+          setQuestionTimeRemaining(prev => {
+            if (prev <= 1) {
+              // Time's up! Auto-submit
+              console.log("Per-question time limit reached! Auto-submitting...");
+              
+              // Clear timer
+              if (questionCountdownRef.current) {
+                clearInterval(questionCountdownRef.current);
+                questionCountdownRef.current = undefined;
+              }
+              
+              // Auto-submit current answer
+              setTimeout(() => {
+                if (isRecording) {
+                  setIsRecording(false); // Stop recording
+                }
+                // Submit with current answer (text or transcription)
+                const currentAnswer = textAnswer || editableTranscription || '';
+                onAnswerSubmit(currentAnswer);
+              }, 100);
+              
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+      }
     }
 
     // Reset media state when question changes
@@ -152,24 +181,11 @@ const Flashcard: React.FC<FlashcardProps> = ({
     setIsTranscribing(false);
 
     return () => {
-      if (questionTimerRef.current) {
-        clearInterval(questionTimerRef.current);
+      if (questionCountdownRef.current) {
+        clearInterval(questionCountdownRef.current);
       }
     };
-  }, [currentQuestionIndex, isAnswered]); // Removed questionTimes from deps to avoid loops
-
-  // Update question times in parent periodically using a debounced approach
-  useEffect(() => {
-    if (!isAnswered) {
-      const updateInterval = setInterval(() => {
-        const currentTimes = [...questionTimesRef.current];
-        currentTimes[currentQuestionIndex] = currentQuestionTime;
-        setQuestionTimes(currentTimes);
-      }, 2000); // Update every 2 seconds to reduce conflicts
-      
-      return () => clearInterval(updateInterval);
-    }
-  }, [currentQuestionTime, currentQuestionIndex, isAnswered, setQuestionTimes]);
+  }, [currentQuestionIndex, isAnswered, testTimerValue]); // Simplified dependencies
 
   // Separate effect to handle text answer loading - only when question or answer status changes
   useEffect(() => {
@@ -277,15 +293,6 @@ const Flashcard: React.FC<FlashcardProps> = ({
   const handleSubmit = () => {
     if (mode === 'text') {
       if (textAnswer.trim()) {
-        // Stop the question timer when submitting and save the time
-        if (questionTimerRef.current) {
-          clearInterval(questionTimerRef.current);
-          questionTimerRef.current = undefined;
-        }
-        // Immediately update question times for this question
-        const currentTimes = [...questionTimesRef.current];
-        currentTimes[currentQuestionIndex] = currentQuestionTime;
-        setQuestionTimes(currentTimes);
         onAnswerSubmit(textAnswer);
       } else {
         toast({
@@ -298,15 +305,6 @@ const Flashcard: React.FC<FlashcardProps> = ({
       // For audio/video modes, use the final transcription (edited takes precedence over real-time)
       const finalTranscription = editableTranscription || realtimeTranscription;
       if (finalTranscription.trim() && mediaData) {
-        // Stop the question timer when submitting and save the time
-        if (questionTimerRef.current) {
-          clearInterval(questionTimerRef.current);
-          questionTimerRef.current = undefined;
-        }
-        // Immediately update question times for this question
-        const currentTimes = [...questionTimesRef.current];
-        currentTimes[currentQuestionIndex] = currentQuestionTime;
-        setQuestionTimes(currentTimes);
         onAnswerSubmit(finalTranscription, mediaData.dataUri);
       } else {
         toast({
@@ -396,11 +394,15 @@ const Flashcard: React.FC<FlashcardProps> = ({
                 <div className='h-6 w-6 rounded-full bg-red-500 flex items-center justify-center'>
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-timer"><line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="12" y1="6" y2="2"/><circle cx="12" cy="14" r="8"/></svg>
                 </div>
-                TEST TIME | {formatTime(testTimeElapsed)}
+                TOTAL TEST TIME | {formatTime(testTimeElapsed)}
               </div>
               <Button 
                 onClick={() => {
-                  console.log('🔴 Finish button clicked in Flashcard');
+                  // Stop the test timer when finishing the test
+                  if (testTimerRef.current) {
+                    clearInterval(testTimerRef.current);
+                    testTimerRef.current = undefined;
+                  }
                   onFinishInterview();
                 }} 
                 className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md font-medium"
@@ -410,9 +412,32 @@ const Flashcard: React.FC<FlashcardProps> = ({
             </div>
           </div>
            <div className="bg-gray-100 border-b border-gray-300 p-2 flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm font-semibold ml-4">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                    Question Time | {formatTime(currentQuestionTime)}
+                <div className="flex items-center gap-6">
+                    {testTimerValue && testTimerValue > 0 && (
+                        <div className={`flex flex-col gap-1 ml-4 ${questionTimeRemaining <= 30 ? 'text-red-600' : questionTimeRemaining <= 60 ? 'text-orange-600' : 'text-green-600'}`}>
+                            <div className="flex items-center gap-2 text-sm font-semibold">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7">
+                                    <path d="M10 2h4"/>
+                                    <path d="m4.6 11 7.4-7.4"/>
+                                    <path d="M20 14a8 8 0 1 1-8-8 8 8 0 0 1 8 8Z"/>
+                                    <path d="M7 15h5v5"/>
+                                </svg>
+                                Time Remaining | {formatTime(questionTimeRemaining)}
+                            </div>
+                            {/* Progress bar showing remaining time */}
+                            <div className="w-40 h-3 bg-gray-300 rounded-full overflow-hidden">
+                                <div 
+                                    className={`h-full transition-all duration-1000 ${
+                                        questionTimeRemaining <= 30 ? 'bg-red-500' : 
+                                        questionTimeRemaining <= 60 ? 'bg-orange-500' : 'bg-green-500'
+                                    }`}
+                                    style={{ 
+                                        width: `${Math.max(0, (questionTimeRemaining / (testTimerValue * 60)) * 100)}%` 
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    )}
                 </div>
                 <Button variant="outline" className="bg-orange-400 hover:bg-orange-500 text-white rounded-full border-orange-500 px-4 py-1 h-auto" onClick={() => setShowInstructions(true)}>
                     Instruction <Info className="ml-2 h-4 w-4" />
