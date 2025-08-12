@@ -6,12 +6,20 @@ import { generateUserSubmissionPath, isUserNamedFoldersEnabled } from './folder-
 const storage = getStorage(app);
 
 /**
+<<<<<<< HEAD
  * 🔒 ENHANCED WITH MINIMAL IMPACT - Upload media blob to Firebase Storage with user-named folder support
+=======
+ * 🔒 CONSISTENT SUBMISSION ID STRUCTURE - Upload media blob to Firebase Storage
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
  * @param blob - The media blob (audio/video)
- * @param submissionId - The submission ID for organizing files
+ * @param submissionId - The submission ID for organizing files (now always used as folder name)
  * @param entryIndex - The question index
  * @param mediaType - 'audio' or 'video'
+<<<<<<< HEAD
  * @param candidateName - Optional candidate name for user-named folders (NEW PARAMETER)
+=======
+ * @param candidateName - Optional candidate name (maintained for backward compatibility but not used for folder naming)
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
  * @returns Promise<string> - The download URL
  */
 export async function uploadMediaToStorage(
@@ -19,6 +27,7 @@ export async function uploadMediaToStorage(
   submissionId: string,
   entryIndex: number,
   mediaType: 'audio' | 'video',
+<<<<<<< HEAD
   candidateName?: string // 🔒 NEW OPTIONAL PARAMETER - maintains backward compatibility
 ): Promise<string> {
   try {
@@ -33,6 +42,13 @@ export async function uploadMediaToStorage(
       // LEGACY: Use original submission ID structure (100% backward compatible)
       folderPath = submissionId;
     }
+=======
+  candidateName?: string // Maintained for backward compatibility
+): Promise<string> {
+  try {
+    // 🔒 SIMPLIFIED CONSISTENT STRUCTURE - Always use submission ID as folder name
+    const folderPath = submissionId;
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
     
     const fileName = `submissions/${folderPath}/Q${entryIndex + 1}_${mediaType}.webm`;
     const storageRef = ref(storage, fileName);
@@ -40,7 +56,8 @@ export async function uploadMediaToStorage(
     const snapshot = await uploadBytes(storageRef, blob);
     const downloadURL = await getDownloadURL(snapshot.ref);
     
-    console.log(`✅ ${mediaType} uploaded to Firebase Storage:`, fileName);
+    console.log(`✅ ${mediaType} uploaded to Firebase Storage: ${fileName}`);
+    console.log(`📁 Using submission ID folder structure: ${folderPath}`);
     return downloadURL;
   } catch (error) {
     console.error(`❌ Error uploading ${mediaType} to Firebase Storage:`, error);

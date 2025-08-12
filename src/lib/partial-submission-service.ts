@@ -110,16 +110,16 @@ export class PartialSubmissionService {
         // Question data
         question: data.questionData.question,
         answer: data.questionData.answer,
-        videoDataUri: processedVideoDataUri, // 🔒 Either undefined (uploaded) or original data URI
-        videoUrl: videoUploadUrl, // 🔒 NEW FIELD - Storage URL if uploaded
-        preferredAnswer: data.questionData.preferredAnswer,
-        competency: data.questionData.competency,
+        videoDataUri: processedVideoDataUri ?? null, // 🔒 Convert undefined to null for Firestore
+        videoUrl: videoUploadUrl ?? null, // 🔒 NEW FIELD - Storage URL if uploaded
+        preferredAnswer: data.questionData.preferredAnswer ?? null, // 🔒 Convert undefined to null
+        competency: data.questionData.competency ?? null, // 🔒 Convert undefined to null
         
         // SJT fields
-        situation: data.questionData.situation,
-        bestResponseRationale: data.questionData.bestResponseRationale,
-        worstResponseRationale: data.questionData.worstResponseRationale,
-        assessedCompetency: data.questionData.assessedCompetency,
+        situation: data.questionData.situation ?? null, // 🔒 Convert undefined to null
+        bestResponseRationale: data.questionData.bestResponseRationale ?? null, // 🔒 Convert undefined to null
+        worstResponseRationale: data.questionData.worstResponseRationale ?? null, // 🔒 Convert undefined to null
+        assessedCompetency: data.questionData.assessedCompetency ?? null, // 🔒 Convert undefined to null
         
         // Metadata
         timestamp: new Date(),
@@ -158,7 +158,7 @@ export class PartialSubmissionService {
     try {
       console.log('🔍 [PartialSubmission] Checking for incomplete sessions for user:', userId);
       
-      // 🔒 MINIMAL IMPACT FIX: Remove orderBy to avoid composite index requirement
+      // 🔒 SIMPLIFIED QUERY - Only filter by userId and isComplete to avoid composite index
       const q = query(
         collection(db, PARTIAL_SUBMISSIONS_COLLECTION),
         where('userId', '==', userId),
@@ -175,10 +175,19 @@ export class PartialSubmissionService {
       // Group by sessionId to find the most recent incomplete session
       const partialsBySession = new Map<string, PartialSubmission[]>();
       
-      // 🔒 MINIMAL IMPACT FIX: Client-side sort to replicate orderBy('timestamp', 'desc')
-      const sortedDocs = querySnapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as PartialSubmission))
-        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      // 🔒 FIXED TIMESTAMP HANDLING - Convert Firestore Timestamp to Date
+      const allPartials = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          // Convert Firestore Timestamp to Date if needed
+          timestamp: data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp)
+        } as PartialSubmission;
+      });
+      
+      // Client-side sort by timestamp descending
+      const sortedDocs = allPartials.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
       
       sortedDocs.forEach(partial => {
         const sessionId = partial.sessionId;
@@ -245,10 +254,10 @@ export class PartialSubmissionService {
    */
   async getSessionProgress(sessionId: string): Promise<ProgressInfo | null> {
     try {
+      // 🔒 SIMPLIFIED QUERY - Avoid composite index requirement  
       const q = query(
         collection(db, PARTIAL_SUBMISSIONS_COLLECTION),
-        where('sessionId', '==', sessionId),
-        orderBy('questionIndex', 'asc')
+        where('sessionId', '==', sessionId)
       );
       
       const querySnapshot = await getDocs(q);
@@ -257,10 +266,19 @@ export class PartialSubmissionService {
         return null;
       }
       
-      const partials = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      } as PartialSubmission));
+      // 🔒 FIXED TIMESTAMP HANDLING - Convert Firestore Timestamp to Date
+      const partials = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          // Convert Firestore Timestamp to Date if needed
+          timestamp: data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp)
+        } as PartialSubmission;
+      });
+      
+      // Client-side sort by questionIndex
+      partials.sort((a, b) => a.questionIndex - b.questionIndex);
       
       const firstPartial = partials[0];
       const completedIndices = partials.map(p => p.questionIndex);
@@ -371,13 +389,21 @@ export class PartialSubmissionService {
       // Report progress start
       onProgress?.(0, mediaType);
       
+<<<<<<< HEAD
       // 🔒 ENHANCED UPLOAD - Pass candidate name for user-named folders
+=======
+      // 🔒 CONSISTENT FOLDER STRUCTURE - Use partials prefix to distinguish from final submissions
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
       const downloadURL = await mediaStorage.uploadMediaToStorage(
         blob, 
-        sessionId, // Use sessionId instead of temp submission ID
+        `partials_${sessionId}`, // Use partials prefix with sessionId for consistent structure
         questionIndex, 
         mediaType,
+<<<<<<< HEAD
         candidateName // 🔒 NEW PARAMETER - enables user-named folders when available
+=======
+        candidateName // Maintained for backward compatibility
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
       );
       
       // Report progress complete

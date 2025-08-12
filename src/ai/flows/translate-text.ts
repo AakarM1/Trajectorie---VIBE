@@ -29,7 +29,7 @@ const prompt = ai.definePrompt({
   name: 'translateTextPrompt',
   input: { schema: TranslateTextInputSchema },
   output: { schema: TranslateTextOutputSchema },
-  model: 'googleai/gemini-2.0-flash',
+  model: process.env.GEMINI_DEFAULT_MODEL || 'googleai/gemini-1.5-pro',
   prompt: `
     Translate the following text into {{{targetLanguage}}}.
     Return only the translated text, with no additional commentary or explanations.

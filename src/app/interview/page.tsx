@@ -78,30 +78,6 @@ function VerbalInterviewPage() {
     checkAttempts();
   }, [canUserTakeTest, toast]);
 
-  // 🔒 MINIMAL IMPACT SESSION RECOVERY - Only runs if feature enabled
-  useEffect(() => {
-    const checkForRecovery = async () => {
-      if (!featureFlags.isSessionRecoveryEnabled() || !user || checkingAttempts) {
-        return;
-      }
-
-      try {
-        console.log('🔍 [Interview] Checking for recoverable sessions...');
-        const recovery = await progressive.checkForRecovery();
-        
-        if (recovery && recovery.canResume) {
-          console.log('🔄 [Interview] Found recoverable session, showing modal');
-          setRecoveryData(recovery);
-          setShowRecoveryModal(true);
-        }
-      } catch (error) {
-        console.error('❌ [Interview] Error checking for recovery:', error);
-      }
-    };
-
-    checkForRecovery();
-  }, [user, checkingAttempts, progressive]);
-
   const startInterview = useCallback(async (details: PreInterviewDetails) => {
     setPreInterviewDetails(details);
     setStatus('INTERVIEW');
@@ -417,17 +393,18 @@ function VerbalInterviewPage() {
       
       const success = await progressive.resumeSession(sessionId);
       if (success && recoveryData) {
-        // Load recovered data into current state
+        // 🔒 CRITICAL FIX: Map PartialSubmission to ConversationEntry with correct types
         setConversationHistory(recoveryData.partialSubmissions.map(p => ({
           question: p.question,
           answer: p.answer,
-          videoDataUri: p.videoDataUri,
-          preferredAnswer: p.preferredAnswer,
-          competency: p.competency,
-          situation: p.situation,
-          bestResponseRationale: p.bestResponseRationale,
-          worstResponseRationale: p.worstResponseRationale,
-          assessedCompetency: p.assessedCompetency
+          // Convert string | null to string | undefined for ConversationEntry
+          videoDataUri: p.videoDataUri || undefined,
+          preferredAnswer: p.preferredAnswer || undefined,
+          competency: p.competency || undefined,
+          situation: p.situation || undefined,
+          bestResponseRationale: p.bestResponseRationale || undefined,
+          worstResponseRationale: p.worstResponseRationale || undefined,
+          assessedCompetency: p.assessedCompetency || undefined
         })));
         
         setCurrentQuestionIndex(recoveryData.lastQuestionIndex + 1);
@@ -559,17 +536,6 @@ function VerbalInterviewPage() {
     <div className="flex flex-col min-h-screen">
       <Header />
       <main className="flex-grow flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8">
-        {/* 🔒 MINIMAL IMPACT SESSION RECOVERY MODAL - Only shown when needed */}
-        {featureFlags.isSessionRecoveryEnabled() && (
-          <SessionRecoveryModal
-            isOpen={showRecoveryModal}
-            recovery={recoveryData}
-            onResume={handleResumeSession}
-            onStartNew={handleStartNewSession}
-            onClose={() => setShowRecoveryModal(false)}
-          />
-        )}
-        
         {checkingAttempts ? (
           <div className="flex flex-col items-center justify-center text-center p-8">
             <Loader2 className="h-16 w-16 animate-spin text-primary mb-4" />

@@ -1,8 +1,26 @@
 [
   {
-    "origin": ["*"],
-    "method": ["GET", "HEAD"],
+    "origin": [
+      "http://localhost:3000",
+      "https://trajectorie-vibe.vercel.app",
+      "https://*.vercel.app",
+      "https://*.trajectorie-vibe.vercel.app"
+    ],
+    "method": [
+      "GET",
+      "POST",
+      "PUT",
+      "DELETE",
+      "HEAD",
+      "OPTIONS"
+    ],
     "maxAgeSeconds": 3600,
-    "responseHeader": ["Content-Type", "Content-Length", "Content-Range"]
+    "responseHeader": [
+      "Content-Type",
+      "Authorization",
+      "Content-Range",
+      "Content-Disposition",
+      "Content-Length"
+    ]
   }
 ]

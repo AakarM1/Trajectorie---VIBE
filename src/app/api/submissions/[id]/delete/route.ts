@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { submissionService } from '@/lib/database';
 import { getStorage, ref, listAll, deleteObject } from 'firebase/storage';
 import app from '@/lib/firebase';
+<<<<<<< HEAD
 import { getPossibleFolderPaths } from '@/lib/folder-utils';
+=======
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
 
 const storage = getStorage(app);
 
@@ -15,6 +18,73 @@ const storage = getStorage(app);
  * 
  * This ensures complete data cleanup and prevents orphaned files.
  */
+<<<<<<< HEAD
+=======
+/**
+ * Find submission across both Firestore and localStorage
+ */
+async function findSubmissionAcrossStorage(submissionId: string): Promise<{
+  submission: any;
+  storageMode: 'firestore' | 'localStorage' | null;
+  actualStoragePaths: string[];
+}> {
+  // Try Firestore first
+  try {
+    const firestoreSubmission = await submissionService.getById(submissionId);
+    if (firestoreSubmission) {
+      const storagePaths = extractStoragePathsFromSubmission(firestoreSubmission);
+      return {
+        submission: firestoreSubmission,
+        storageMode: 'firestore',
+        actualStoragePaths: storagePaths
+      };
+    }
+  } catch (error) {
+    console.log(`📝 Firestore search failed for ${submissionId}:`, error instanceof Error ? error.message : String(error));
+  }
+
+  // Try localStorage (Note: This won't work server-side, but we'll check for the pattern)
+  // If it's a localStorage pattern, we know it exists there
+  if (submissionId.match(/^sub_\d+_[a-z0-9]+$/)) {
+    console.log(`📝 Detected localStorage pattern ID: ${submissionId}`);
+    // Generate expected storage paths for localStorage submissions
+    const expectedPaths = [`submissions/${submissionId}`];
+    return {
+      submission: { id: submissionId, storageMode: 'localStorage' },
+      storageMode: 'localStorage',
+      actualStoragePaths: expectedPaths
+    };
+  }
+
+  return {
+    submission: null,
+    storageMode: null,
+    actualStoragePaths: []
+  };
+}
+
+/**
+ * Extract storage folder paths from submission history URLs
+ */
+function extractStoragePathsFromSubmission(submission: any): string[] {
+  const paths = new Set<string>();
+  
+  if (submission.history) {
+    submission.history.forEach((entry: any) => {
+      if (entry.videoDataUri?.includes('firebasestorage.googleapis.com')) {
+        const match = entry.videoDataUri.match(/submissions%2F([^%]+?)%2F/);
+        if (match) {
+          const folderName = decodeURIComponent(match[1]);
+          paths.add(`submissions/${folderName}`);
+        }
+      }
+    });
+  }
+  
+  return Array.from(paths);
+}
+
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
 export async function DELETE(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -30,6 +100,7 @@ export async function DELETE(
       );
     }
 
+<<<<<<< HEAD
     console.log(`🗑️ Starting cascading deletion for submission: ${submissionId}`);
 
     // Step 1: Verify submission exists before attempting deletion
@@ -38,10 +109,22 @@ export async function DELETE(
       console.warn(`⚠️ Submission not found: ${submissionId}`);
       return NextResponse.json(
         { error: 'Submission not found' },
+=======
+    console.log(`🗑️ Starting enhanced cascading deletion for submission: ${submissionId}`);
+
+    // Step 1: Find submission across all storage modes
+    const { submission, storageMode, actualStoragePaths } = await findSubmissionAcrossStorage(submissionId);
+    
+    if (!submission && actualStoragePaths.length === 0) {
+      console.warn(`⚠️ Submission not found in any storage mode: ${submissionId}`);
+      return NextResponse.json(
+        { error: 'Submission not found in Firestore or localStorage pattern' },
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
         { status: 404 }
       );
     }
 
+<<<<<<< HEAD
     let filesDeleted = 0;
     let storageErrors: string[] = [];
 
@@ -53,6 +136,27 @@ export async function DELETE(
     console.log(`📁 Checking ${possiblePaths.length} possible folder paths:`, possiblePaths);
     
     for (const folderPath of possiblePaths) {
+=======
+    console.log(`📍 Found submission in ${storageMode} mode with ${actualStoragePaths.length} storage paths`);
+
+    let filesDeleted = 0;
+    let storageErrors: string[] = [];
+    let foldersFound: string[] = [];
+
+    // Step 2: Generate all possible storage paths to check
+    const allPathsToCheck = [
+      ...actualStoragePaths,
+      `submissions/${submissionId}`, // Current structure
+      `submissions/temp_${submissionId}`, // Legacy temp structure
+      `submissions/partials_${submissionId}` // Partial submissions
+    ];
+    
+    // Remove duplicates
+    const uniquePaths = [...new Set(allPathsToCheck)];
+    console.log(`📁 Checking ${uniquePaths.length} possible folder paths:`, uniquePaths);
+    // Step 3: Delete files from all possible storage locations
+    for (const folderPath of uniquePaths) {
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
       try {
         // Remove trailing slash and get folder name for Firebase Storage ref
         const cleanFolderPath = folderPath.replace(/\/$/, '');
@@ -64,6 +168,11 @@ export async function DELETE(
         console.log(`📁 Found ${listResult.items.length} files in ${cleanFolderPath}`);
         
         if (listResult.items.length > 0) {
+<<<<<<< HEAD
+=======
+          foldersFound.push(cleanFolderPath);
+          
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
           // Delete all files in parallel for better performance
           const deletePromises = listResult.items.map(async (fileRef) => {
             try {
@@ -110,6 +219,7 @@ export async function DELETE(
       console.warn(`⚠️ ${storageErrors.length} storage errors encountered:`, storageErrors);
     }
 
+<<<<<<< HEAD
     // Step 3: Delete the Firestore document
     console.log(`🗄️ Deleting Firestore document: ${submissionId}`);
     const firestoreDeleteSuccess = await submissionService.delete(submissionId);
@@ -122,12 +232,48 @@ export async function DELETE(
           details: 'Firestore deletion failed',
           submissionId,
           filesDeleted,
+=======
+    // Step 4: Delete the submission document (only if in Firestore)
+    let submissionDeleted = false;
+    let submissionError = '';
+    
+    if (storageMode === 'firestore') {
+      console.log(`🗄️ Deleting Firestore document: ${submissionId}`);
+      const firestoreDeleteSuccess = await submissionService.delete(submissionId);
+      
+      if (!firestoreDeleteSuccess) {
+        submissionError = 'Failed to delete submission from Firestore';
+        console.error(`❌ ${submissionError}`);
+      } else {
+        submissionDeleted = true;
+      }
+    } else if (storageMode === 'localStorage') {
+      // localStorage submissions can't be deleted server-side
+      // Client will need to handle localStorage cleanup
+      submissionDeleted = true;
+      console.log(`📝 localStorage submission flagged for client-side deletion`);
+    } else {
+      submissionDeleted = true; // For orphaned files without submission record
+      console.log(`📝 Orphaned files deleted without submission document`);
+    }
+
+    if (!submissionDeleted && submissionError) {
+      return NextResponse.json(
+        { 
+          error: submissionError,
+          details: 'Storage files deleted but submission document deletion failed',
+          submissionId,
+          storageMode,
+          filesDeleted,
+          foldersFound: foldersFound.length,
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
           storageErrors
         },
         { status: 500 }
       );
     }
 
+<<<<<<< HEAD
     console.log(`✅ Successfully completed cascading deletion for: ${submissionId}`);
     console.log(`📊 Deletion summary: ${filesDeleted} files deleted, ${storageErrors.length} storage errors`);
 
@@ -138,6 +284,26 @@ export async function DELETE(
       filesDeleted,
       storageErrors: storageErrors.length > 0 ? storageErrors : undefined
     });
+=======
+    console.log(`✅ Successfully completed enhanced cascading deletion for: ${submissionId}`);
+    
+    const summary = {
+      success: true,
+      message: 'Enhanced cascading deletion completed successfully',
+      submissionId,
+      storageMode,
+      submissionDeleted,
+      filesDeleted,
+      foldersFound: foldersFound.length,
+      foldersChecked: uniquePaths.length,
+      pathsChecked: uniquePaths,
+      actualPathsFromUrls: actualStoragePaths,
+      storageErrors: storageErrors.length > 0 ? storageErrors : undefined
+    };
+
+    console.log(`📊 Enhanced deletion summary:`, summary);
+    return NextResponse.json(summary);
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
 
   } catch (error) {
     console.error('❌ Unexpected error during cascading deletion:', error);

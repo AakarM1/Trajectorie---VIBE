@@ -62,7 +62,11 @@ const ReportDetailPage = () => {
         return hasBasicAnalysis;
     };
 
+<<<<<<< HEAD
     const generateAiAnalysis = async (isRegeneration = false) => {
+=======
+    const generateAiAnalysis = async (forceRegenerate = false) => {
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
         if (!submission) return;
         
         if (isRegeneration) {
@@ -73,7 +77,11 @@ const ReportDetailPage = () => {
         setAnalysisError(null);
         
         try {
+<<<<<<< HEAD
             console.log(`🤖 ${isRegeneration ? 'Regenerating' : 'Generating'} AI analysis for submission:`, submission.id);
+=======
+            console.log(`🤖 ${forceRegenerate ? 'Regenerating' : 'Generating'} AI analysis for submission:`, submission.id);
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
             
             const response = await fetch('/api/background-analysis', {
                 method: 'POST',
@@ -81,15 +89,26 @@ const ReportDetailPage = () => {
                 body: JSON.stringify({
                     submissionId: submission.id,
                     type: submission.testType.toLowerCase() === 'jdt' ? 'interview' : 'sjt',
+<<<<<<< HEAD
                     forceRegenerate: isRegeneration
+=======
+                    forceRegenerate
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
                 }),
             });
             
             if (!response.ok) {
+<<<<<<< HEAD
                 throw new Error(`Analysis ${isRegeneration ? 'regeneration' : 'generation'} failed: ${response.status}`);
             }
             
             console.log(`✅ AI analysis ${isRegeneration ? 'regeneration' : 'generation'} triggered`);
+=======
+                throw new Error(`Analysis ${forceRegenerate ? 'regeneration' : 'generation'} failed: ${response.status}`);
+            }
+            
+            console.log(`✅ AI analysis ${forceRegenerate ? 'regeneration' : 'generation'} triggered`);
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
             
             // Poll for updates every 3 seconds, but with more lenient success detection
             const pollForUpdates = async () => {
@@ -137,6 +156,7 @@ const ReportDetailPage = () => {
             pollForUpdates();
             
         } catch (error) {
+<<<<<<< HEAD
             console.error(`Error ${isRegeneration ? 'regenerating' : 'generating'} AI analysis:`, error);
             if (isRegeneration) {
                 setRegeneratingAnalysis(false);
@@ -144,6 +164,11 @@ const ReportDetailPage = () => {
                 setGeneratingAnalysis(false);
             }
             setAnalysisError(error instanceof Error ? error.message : `Failed to ${isRegeneration ? 'regenerate' : 'generate'} analysis`);
+=======
+            console.error(`Error ${forceRegenerate ? 'regenerating' : 'generating'} AI analysis:`, error);
+            setGeneratingAnalysis(false);
+            setAnalysisError(error instanceof Error ? error.message : `Failed to ${forceRegenerate ? 'regenerate' : 'generate'} analysis`);
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
         }
     };
 
@@ -257,6 +282,32 @@ const ReportDetailPage = () => {
                     </Card>
                 )}
                 
+                {!showAnalysisGeneration && !generatingAnalysis && submission.report && (
+                    <Card className="w-full max-w-4xl mb-6 border-blue-200 bg-blue-50">
+                        <CardContent className="p-6">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <h3 className="text-lg font-semibold text-blue-800 mb-2">
+                                        AI Analysis Complete
+                                    </h3>
+                                    <p className="text-blue-700">
+                                        This submission has comprehensive AI analysis. You can regenerate the analysis to get fresh insights with updated AI models.
+                                    </p>
+                                </div>
+                                <Button 
+                                    onClick={() => generateAiAnalysis(true)}
+                                    variant="outline"
+                                    className="ml-4 border-blue-300 text-blue-700 hover:bg-blue-100"
+                                    disabled={generatingAnalysis}
+                                >
+                                    <RefreshCw className="mr-2 h-4 w-4" />
+                                    Regenerate Analysis
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
+                
                 {generatingAnalysis && (
                     <Card className="w-full max-w-4xl mb-6 border-blue-200 bg-blue-50">
                         <CardContent className="p-6">
@@ -295,7 +346,11 @@ const ReportDetailPage = () => {
                                         Refresh Page
                                     </Button>
                                     <Button 
+<<<<<<< HEAD
                                         onClick={() => generateAiAnalysis(hasExistingAnalysis)}
+=======
+                                        onClick={() => generateAiAnalysis(false)}
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
                                         variant="outline"
                                         className="border-red-300 text-red-700 hover:bg-red-100"
                                         disabled={generatingAnalysis || regeneratingAnalysis}

@@ -1,16 +1,14 @@
-<<<<<<< HEAD
-=======
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import type { Submission } from '@/types';
-import { 
-  userService, 
-  submissionService, 
+import {
+  userService,
+  submissionService,
   convertFirestoreSubmission,
-  type FirestoreUser 
+  type FirestoreUser
 } from '@/lib/database';
 import { getStorageConfig } from '@/lib/storage-config';
 
@@ -40,25 +38,25 @@ interface AuthContextType {
   getUsers: () => Promise<User[]>;
   deleteUser: (userId: string) => Promise<void>;
   updateUser: (userId: string, updates: Partial<User>) => Promise<void>;
+  canUserTakeTest: (userId: string) => Promise<boolean>;
 }
 
-// 🔒 CRITICAL FIX: Remove duplicate declarations
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-const ADMIN_EMAIL = 'admin@gmail.com';
 
 // Fallback keys for localStorage (when Firestore is unavailable)
 const USERS_KEY = 'verbal-insights-users';
 const SESSION_KEY = 'verbal-insights-session';
 const SUBMISSIONS_KEY = 'verbal-insights-submissions';
+const ADMIN_EMAIL = 'admin@gmail.com';
 
 // Check if we should use localStorage instead of Firestore
 const useLocalStorage = () => {
   const { useFirestore } = getStorageConfig();
   const shouldUseLocal = !useFirestore;
   if (shouldUseLocal) {
-    console.log('�️ Using LOCAL STORAGE mode');
+    console.log('🔧 Using LOCAL STORAGE mode');
   } else {
-    console.log('� Using FIRESTORE mode');
+    console.log('☁️ Using FIRESTORE mode');
   }
   return shouldUseLocal;
 };
@@ -93,12 +91,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         // Only access localStorage after component mounts (client-side only)
         const storedUser = getInitialUser();
         setUser(storedUser);
-        
+
         // Seed default users with timeout to prevent hanging
-        const timeoutPromise = new Promise((_, reject) => 
+        const timeoutPromise = new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Timeout')), 5000)
         );
-        
+
         await Promise.race([seedDefaultUsers(), timeoutPromise]);
       } catch (error) {
         console.error('Error initializing auth:', error);
@@ -107,7 +105,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setLoading(false);
       }
     };
-    
+
     initializeAuth();
   }, []);
 
@@ -117,10 +115,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } else {
       try {
         // Add a quick timeout for Firestore operations
-        const firestoreTimeout = new Promise((_, reject) => 
+        const firestoreTimeout = new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Firestore timeout')), 3000)
         );
-        
+
         const seedFirestore = async () => {
           // Check if admin already exists
           const adminUser = await userService.getByEmail(ADMIN_EMAIL);
@@ -159,11 +157,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 role: user.role,
               });
             }
-            
+
             console.log('✅ Seeded Firestore with 1 admin and 10 test users');
           }
         };
-        
+
         await Promise.race([seedFirestore(), firestoreTimeout]);
       } catch (error) {
         console.error('Error seeding users in Firestore, falling back to localStorage:', error);
@@ -174,20 +172,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const seedUsersLocalStorage = async () => {
     if (typeof window === 'undefined') return;
-    
+
     let users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-    
+
     // Check if seeding is already done
     const adminExists = users.some((u: any) => u.email === ADMIN_EMAIL);
     const hasTestUsers = users.some((u: any) => u.email.includes('test'));
-    
+
     if (adminExists && hasTestUsers) {
       return; // Already seeded
     }
-    
+
     // Clear existing users and seed fresh data
     users = [];
-    
+
     // Add 1 Admin User
     users.push({
       id: 'admin-001',
@@ -198,7 +196,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       clientName: 'Trajectorie',
       role: 'Administrator',
     });
-    
+
     // Add 10 Test Users with diverse profiles
     const testUsers = [
       {
@@ -292,13 +290,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         role: 'UX Designer',
       },
     ];
-    
+
     // Add all test users
     users.push(...testUsers);
-    
+
     // Save to localStorage
     localStorage.setItem(USERS_KEY, JSON.stringify(users));
-    
+
     console.log('✅ Seeded localStorage with 1 admin and 10 test users');
   };
 
@@ -313,7 +311,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const userToStore = convertFirestoreUser(foundUser);
         localStorage.setItem(SESSION_KEY, JSON.stringify(userToStore));
         setUser(userToStore);
-        
+
         if (userToStore.email === ADMIN_EMAIL) {
           router.push('/admin');
         } else {
@@ -331,12 +329,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const loginLocalStorage = (email: string, pass: string): boolean => {
     const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
     const foundUser = users.find((u: any) => u.email === email && u.password === pass);
-    
+
     if (foundUser) {
       const { password, ...userToStore } = foundUser;
       localStorage.setItem(SESSION_KEY, JSON.stringify(userToStore));
       setUser(userToStore);
-      
+
       if (userToStore.email === ADMIN_EMAIL) {
         router.push('/admin');
       } else {
@@ -355,7 +353,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const existing = await userService.getByEmail(details.email);
       if (existing) return false;
-      
+
       const userId = await userService.create({
         email: details.email,
         passwordHash: details.password, // In real app, hash this
@@ -364,7 +362,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         clientName: details.clientName,
         role: details.role
       });
-      
+
       return userId !== null;
     } catch (error) {
       console.error('Firestore register error, falling back to localStorage:', error);
@@ -376,7 +374,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
     const existing = users.find((u: any) => u.email === details.email);
     if (existing) return false;
-    
+
     const newUser = { ...details, id: new Date().toISOString() };
     users.push(newUser);
     localStorage.setItem(USERS_KEY, JSON.stringify(users));
@@ -546,7 +544,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       let users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
       users = users.map((u: User) => u.id === userId ? { ...u, ...updates } : u);
       localStorage.setItem(USERS_KEY, JSON.stringify(users));
-      
+
       // Update local session if it's the current user
       if (user && user.id === userId) {
         const updatedUser = { ...user, ...updates };
@@ -558,7 +556,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     try {
       await userService.update(userId, updates);
-      
+
       // Update local session if it's the current user
       if (user && user.id === userId) {
         const updatedUser = { ...user, ...updates };
@@ -571,7 +569,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       let users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
       users = users.map((u: User) => u.id === userId ? { ...u, ...updates } : u);
       localStorage.setItem(USERS_KEY, JSON.stringify(users));
-      
+
       // Update local session if it's the current user
       if (user && user.id === userId) {
         const updatedUser = { ...user, ...updates };
@@ -579,6 +577,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         localStorage.setItem(SESSION_KEY, JSON.stringify(updatedUser));
       }
     }
+  };
+
+  const canUserTakeTest = async (userId: string): Promise<boolean> => {
+    // For now, always return true - can be enhanced later
+    return true;
   };
 
   return (
@@ -595,7 +598,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       clearAllSubmissions,
       getUsers,
       deleteUser,
-      updateUser
+      updateUser,
+      canUserTakeTest
     }}>
       {children}
     </AuthContext.Provider>
@@ -620,7 +624,7 @@ export const ProtectedRoute = ({ children, adminOnly = false }: { children: Reac
     if (!loading && !user && pathname !== '/login' && pathname !== '/register') {
       router.push('/login');
     }
-    
+
     // Check admin access if adminOnly is true
     if (!loading && user && adminOnly && user.role !== 'Administrator' && user.email !== 'admin@gmail.com') {
       router.push('/'); // Redirect non-admin users to home
@@ -653,4 +657,3 @@ export const ProtectedRoute = ({ children, adminOnly = false }: { children: Reac
 
   return <>{children}</>;
 };
->>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7

@@ -287,9 +287,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       
       checkUndefined(submissionWithCandidateId, 'submission');
       
-      // Process media files that might be too large for Firestore
+      // 🔒 CORRECTED FLOW: Upload media first, then save submission with URLs
+      console.log('� Step 1: Processing and uploading media files...');
+      
+      // Generate a predictable submission ID for consistent folder structure
+      const tempSubmissionId = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      console.log('📁 Using predictable submission ID for folder structure:', tempSubmissionId);
+      
       const processedHistory = await Promise.all(
         submissionWithCandidateId.history.map(async (entry, index) => {
+<<<<<<< HEAD
           if (!entry.videoDataUri) return entry;
           
           // Dynamic import to avoid bundling issues
@@ -328,9 +335,43 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               console.warn(`⚠️ Failed to upload to Firebase Storage, keeping original data URI:`, storageError);
               return entry; // Keep original data URI as fallback
             }
+=======
+          if (!entry.videoDataUri || !entry.videoDataUri.startsWith('data:')) {
+            return entry; // Skip if no video data or already a URL
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
           }
           
-          return entry; // Keep small files as data URIs
+          try {
+            // Dynamic import to avoid bundling issues
+            const { dataUriToBlob, uploadMediaToStorage } = await import('@/lib/media-storage');
+            
+            console.log(`📎 Uploading Q${index + 1} media using predictable ID: ${tempSubmissionId}`);
+            
+            // Convert data URI to blob
+            const blob = await dataUriToBlob(entry.videoDataUri);
+            
+            // Determine media type
+            const mediaType = entry.videoDataUri.startsWith('data:video') ? 'video' : 'audio';
+            
+            // 🔒 CRITICAL: Use predictable ID for consistent folder structure
+            const downloadURL = await uploadMediaToStorage(
+              blob, 
+              tempSubmissionId, // Use predictable ID that we'll treat as final
+              index, 
+              mediaType,
+              submissionWithCandidateId.candidateName // Maintained for backward compatibility
+            );
+            
+            // Return entry with Firebase Storage URL instead of data URI
+            return {
+              ...entry,
+              videoDataUri: downloadURL,
+              _isStorageUrl: true // Flag to indicate this is a storage URL
+            };
+          } catch (storageError) {
+            console.warn(`⚠️ Failed to upload Q${index + 1} to Firebase Storage:`, storageError);
+            return entry; // Keep original data URI as fallback
+          }
         })
       );
       
@@ -339,6 +380,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         history: processedHistory
       };
       
+      console.log('� Step 2: Saving submission with processed media URLs to Firestore...');
       console.log('📤 About to save processed submission:', {
         candidateName: submissionWithProcessedMedia.candidateName,
         testType: submissionWithProcessedMedia.testType,
@@ -347,6 +389,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       
       const savedId = await submissionService.create(submissionWithProcessedMedia);
       console.log('✅ Submission saved successfully to Firestore with ID:', savedId);
+      console.log(`📁 Media files stored in: submissions/${tempSubmissionId}/`);
     } catch (error) {
       console.error('❌ Error saving submission to Firestore:', error);
       throw error;
@@ -354,42 +397,113 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const getSubmissions = async (): Promise<Submission[]> => {
+    const allSubmissions: Submission[] = [];
+    
+    // Get Firestore submissions
     try {
       console.log('📖 Fetching submissions from Firestore');
       const fsSubmissions = await submissionService.getAll();
-      const submissions = fsSubmissions.map(convertFirestoreSubmission);
-      console.log(`✅ Fetched ${submissions.length} submissions from Firestore`);
-      return submissions;
+      const firestoreSubmissions = fsSubmissions.map(convertFirestoreSubmission);
+      allSubmissions.push(...firestoreSubmissions);
+      console.log(`✅ Fetched ${firestoreSubmissions.length} submissions from Firestore`);
     } catch (error) {
       console.error('❌ Error fetching submissions from Firestore:', error);
-      return [];
     }
+    
+    // Get localStorage submissions (client-side only)
+    if (typeof window !== 'undefined') {
+      try {
+        const localData = localStorage.getItem('submissions');
+        if (localData) {
+          const localSubmissions: Submission[] = JSON.parse(localData);
+          // Filter out duplicates (same ID in both stores)
+          const newLocalSubmissions = localSubmissions.filter(
+            localSub => !allSubmissions.some(fsSub => fsSub.id === localSub.id)
+          );
+          allSubmissions.push(...newLocalSubmissions);
+          console.log(`✅ Fetched ${newLocalSubmissions.length} additional submissions from localStorage`);
+        }
+      } catch (error) {
+        console.error('❌ Error fetching submissions from localStorage:', error);
+      }
+    }
+    
+    console.log(`📊 Total submissions from all sources: ${allSubmissions.length}`);
+    return allSubmissions;
   };
 
   const getSubmissionById = async (id: string): Promise<Submission | null> => {
+    // Try Firestore first
     try {
       console.log('📖 Fetching submission by ID from Firestore:', id);
       const fsSubmission = await submissionService.getById(id);
-      if (!fsSubmission) {
-        console.log('❌ Submission not found in Firestore');
-        return null;
+      if (fsSubmission) {
+        const submission = convertFirestoreSubmission(fsSubmission);
+        console.log('✅ Submission found in Firestore');
+        return submission;
       }
-      const submission = convertFirestoreSubmission(fsSubmission);
-      console.log('✅ Submission fetched from Firestore');
-      return submission;
     } catch (error) {
       console.error('❌ Error fetching submission from Firestore:', error);
-      return null;
     }
+    
+    // Try localStorage if not found in Firestore
+    if (typeof window !== 'undefined') {
+      try {
+        const localData = localStorage.getItem('submissions');
+        if (localData) {
+          const localSubmissions: Submission[] = JSON.parse(localData);
+          const submission = localSubmissions.find(s => s.id === id);
+          if (submission) {
+            console.log('✅ Submission found in localStorage');
+            return submission;
+          }
+        }
+      } catch (error) {
+        console.error('❌ Error fetching submission from localStorage:', error);
+      }
+    }
+    
+    console.log('❌ Submission not found in any storage mode');
+    return null;
   };
 
   const deleteSubmission = async (id: string): Promise<void> => {
     try {
-      console.log('🗑️ Deleting submission from Firestore:', id);
-      await submissionService.delete(id);
-      console.log('✅ Submission deleted from Firestore');
+      console.log('🗑️ Deleting submission using enhanced API:', id);
+      
+      // Use the enhanced deletion API that handles both storage modes
+      const response = await fetch(`/api/submissions/${id}/delete`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Deletion failed' }));
+        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      console.log('✅ Enhanced deletion completed:', result);
+      
+      // If it was a localStorage submission, also delete it locally
+      if (result.storageMode === 'localStorage' && typeof window !== 'undefined') {
+        try {
+          const localData = localStorage.getItem('submissions');
+          if (localData) {
+            const submissions: Submission[] = JSON.parse(localData);
+            const filtered = submissions.filter(s => s.id !== id);
+            localStorage.setItem('submissions', JSON.stringify(filtered));
+            console.log('✅ Also removed submission from localStorage');
+          }
+        } catch (localError) {
+          console.error('❌ Error removing from localStorage:', localError);
+        }
+      }
+      
     } catch (error) {
-      console.error('❌ Error deleting submission from Firestore:', error);
+      console.error('❌ Error deleting submission:', error);
       throw error;
     }
   };

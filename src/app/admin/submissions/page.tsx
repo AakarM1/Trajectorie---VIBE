@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { extractAudioFromVideo } from '@/lib/audio-extractor';
 
 // Initialize Firebase Storage
 const storage = getStorage(app);
@@ -59,9 +60,14 @@ async function downloadFromFirebaseStorage(storageUrl: string): Promise<Blob> {
           const filePath = decodeURIComponent(urlParts.split('?')[0]);
           console.log(`📁 [DEBUG] Extracted file path: ${filePath}`);
           
+<<<<<<< HEAD
           // 🔒 DETECT FOLDER STRUCTURE - Log structure type for debugging
           const structureType = detectFolderStructure(filePath);
           console.log(`🏗️ [DEBUG] Detected ${structureType} folder structure`);
+=======
+          // 🔒 CONSISTENT STRUCTURE - Now using submission ID-based folder structure
+          console.log(`🏗️ [DEBUG] Using consistent submission ID-based folder structure`);
+>>>>>>> 7113655f149d97853b811e869fec0dc3fa156ca7
           
           // Use Firebase Storage SDK to get a fresh download URL
           const storageRef = ref(storage, filePath);
@@ -413,15 +419,20 @@ const SubmissionsPage = () => {
                       ? videoDataUri.startsWith('data:video')
                       : videoDataUri.includes('_video.');
                     
-                    if ((isVideo && downloadTypes.video) || (!isVideo && downloadTypes.audio)) {
+                    // Enhanced logic to handle audio extraction from videos
+                    const shouldProcessVideo = isVideo && downloadTypes.video;
+                    const shouldProcessAudio = downloadTypes.audio && (isVideo || !isVideo);
+                    
+                    if (shouldProcessVideo || shouldProcessAudio) {
                         console.log(`🔍 Processing Q${index + 1}: ${isVideo ? 'video' : 'audio'} file`);
                         console.log(`📝 URL type: ${isDataUri ? 'Data URI' : 'Storage URL'}`);
                         console.log(`🔗 URL preview: ${videoDataUri.substring(0, 100)}...`);
                         
                         try {
-                            let blob: Blob;
+                            let videoBlob: Blob;
                             let extension = 'webm';
                             
+                            // First, download the original file
                             if (isDataUri) {
                                 // Handle data URI (original format)
                                 try {
@@ -429,8 +440,8 @@ const SubmissionsPage = () => {
                                     if (!response.ok) {
                                         throw new Error(`Data URI fetch failed: ${response.status}`);
                                     }
-                                    blob = await response.blob();
-                                    console.log(`✅ Successfully processed data URI (${blob.size} bytes)`);
+                                    videoBlob = await response.blob();
+                                    console.log(`✅ Successfully processed data URI (${videoBlob.size} bytes)`);
                                 } catch (dataUriError: unknown) {
                                     console.error(`❌ Data URI processing failed:`, dataUriError);
                                     const errorMessage = dataUriError instanceof Error ? dataUriError.message : String(dataUriError);
@@ -441,8 +452,8 @@ const SubmissionsPage = () => {
                                 console.log(`📥 Downloading media from Firebase Storage: ${videoDataUri}`);
                                 
                                 try {
-                                    blob = await downloadFromFirebaseStorage(videoDataUri);
-                                    console.log(`✅ Successfully downloaded from Firebase Storage (${blob.size} bytes)`);
+                                    videoBlob = await downloadFromFirebaseStorage(videoDataUri);
+                                    console.log(`✅ Successfully downloaded from Firebase Storage (${videoBlob.size} bytes)`);
                                 } catch (storageError: unknown) {
                                     const errorMessage = storageError instanceof Error ? storageError.message : String(storageError);
                                     console.error(`❌ Firebase Storage download failed:`, errorMessage);
@@ -456,7 +467,31 @@ const SubmissionsPage = () => {
                                 }
                             }
                             
-                            candidateFolder.file(`Q${index + 1}_${isVideo ? 'video' : 'audio'}.${extension}`, blob!);
+                            // Add original video file if video download is selected
+                            if (shouldProcessVideo) {
+                                candidateFolder.file(`Q${index + 1}_video.${extension}`, videoBlob);
+                                console.log(`📁 Added video file: Q${index + 1}_video.${extension}`);
+                            }
+                            
+                            // Add extracted audio if audio download is selected
+                            if (shouldProcessAudio) {
+                                if (isVideo) {
+                                    // Extract audio from video
+                                    try {
+                                        console.log(`🎵 Extracting audio from video for Q${index + 1}`);
+                                        const audioBlob = await extractAudioFromVideo(videoBlob);
+                                        candidateFolder.file(`Q${index + 1}_audio.mp3`, audioBlob);
+                                        console.log(`📁 Added extracted audio file: Q${index + 1}_audio.mp3`);
+                                    } catch (audioError) {
+                                        console.error(`❌ Audio extraction failed for Q${index + 1}:`, audioError);
+                                        // Continue with other files even if audio extraction fails
+                                    }
+                                } else {
+                                    // Original audio file - add as-is
+                                    candidateFolder.file(`Q${index + 1}_audio.${extension}`, videoBlob);
+                                    console.log(`📁 Added original audio file: Q${index + 1}_audio.${extension}`);
+                                }
+                            }
                         } catch (e) {
                             console.error(`Could not fetch media file for Q${index + 1}:`, e);
                             // Continue with other files even if one fails

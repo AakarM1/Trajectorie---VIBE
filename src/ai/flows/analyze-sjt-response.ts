@@ -46,7 +46,7 @@ const prompt = ai.definePrompt({
   name: 'analyzeSJTResponsePrompt',
   input: { schema: AnalyzeSJTResponseInputSchema },
   output: { schema: AnalyzeSJTResponseOutputSchema },
-  model: 'googleai/gemini-2.0-flash',
+  model: process.env.GEMINI_SJT_EVALUATION_MODEL || 'googleai/gemini-1.5-pro',
   prompt: `
     You are an expert talent assessor specializing in Situational Judgement Tests.
     

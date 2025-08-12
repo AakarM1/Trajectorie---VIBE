@@ -372,9 +372,9 @@ const Flashcard: React.FC<FlashcardProps> = ({
       isVisible ? 'animate-fadeIn' : 'opacity-0 pointer-events-none'
     )}>
       {isProcessing ? (
-        <div className="flex flex-col items-center justify-center h-96">
-          <Loader2 className="h-12 w-12 animate-spin text-primary" />
-          <p className="text-lg font-semibold text-primary mt-4">Saving Answer...</p>
+        <div className="flex flex-col items-center justify-center h-40 my-8 mx-auto px-8 py-6 bg-white rounded-lg shadow-md border border-gray-100 max-w-xs">
+          <Loader2 className="h-10 w-10 animate-spin text-green-600" />
+          <p className="text-base font-medium text-green-600 mt-3">Saving Answer...</p>
         </div>
       ) : (
         <>
@@ -431,9 +431,36 @@ const Flashcard: React.FC<FlashcardProps> = ({
            </div>
           
           <div className="p-6 space-y-6 flex-grow">
-            <p className="text-base font-medium">
+            {question.includes('Follow-up Question') ? (
+              // Special formatting for follow-up questions
+              <div className="text-base">
+                {/* Split question into parts */}
+                {question.split('\n\n').map((part, index) => {
+                  if (part.startsWith('Situation:')) {
+                    return (
+                      <div key={index} className="mb-4">
+                        <p className="font-medium mb-2">{part.split(':')[0]}:</p>
+                        <p className="pl-4 border-l-2 border-gray-300">{part.split(':').slice(1).join(':')}</p>
+                      </div>
+                    );
+                  } else if (part.startsWith('Follow-up Question:')) {
+                    return (
+                      <div key={index} className="mb-2 bg-blue-50 p-3 rounded-md border border-blue-100">
+                        <p className="font-semibold text-blue-800 mb-1">Follow-up Question:</p>
+                        <p className="font-medium">{part.split(':').slice(1).join(':').trim()}</p>
+                      </div>
+                    );
+                  } else {
+                    return <p key={index} className="mb-2">{part}</p>;
+                  }
+                })}
+              </div>
+            ) : (
+              // Regular formatting for standard questions
+              <p className="text-base font-medium">
                 <span className="mr-2">{questionNumber}.</span>{question}
-            </p>
+              </p>
+            )}
 
             {isAnswered && (
                  <div className="flex items-center justify-center text-green-600 p-3 rounded-md bg-green-50 border border-green-200">

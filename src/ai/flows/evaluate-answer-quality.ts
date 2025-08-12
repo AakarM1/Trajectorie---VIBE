@@ -9,6 +9,7 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
+import {SJT_EVALUATION_MODEL} from '@/ai/config';
 
 const EvaluateAnswerQualityInputSchema = z.object({
   situation: z.string().describe('The workplace scenario that was presented to the candidate.'),
@@ -39,7 +40,7 @@ const prompt = ai.definePrompt({
   name: 'evaluateAnswerQualityPrompt',
   input: {schema: EvaluateAnswerQualityInputSchema},
   output: {schema: EvaluateAnswerQualityOutputSchema},
-  model: 'googleai/gemini-2.0-flash',
+  model: SJT_EVALUATION_MODEL,
   prompt: `You are an expert talent assessor evaluating candidate responses in a Situational Judgment Test.
 Your task is to determine if a candidate's answer is complete and thorough, or if follow-up questions are needed.
 
@@ -92,7 +93,8 @@ const evaluateAnswerQualityFlow = ai.defineFlow(
         };
       }
       
-      // Generate the assessment
+      // Generate the assessment with improved error handling
+      console.log(`🤖 Using ${SJT_EVALUATION_MODEL} for sjt-evaluation`);
       const {output} = await prompt(input);
       if (output) {
         console.log(`✅ Answer quality evaluation complete: score=${output.completionScore}, isComplete=${output.isComplete}`);
@@ -116,6 +118,10 @@ const evaluateAnswerQualityFlow = ai.defineFlow(
               output.followUpQuestion = `${expectedPrefix} ${output.followUpQuestion}`;
             }
           }
+          
+          // Add proper spacing and formatting for follow-up questions
+          // Ensure there's a line break after "Situation:" to improve readability
+          output.followUpQuestion = output.followUpQuestion.trim();
         }
         
         return output;
@@ -129,8 +135,22 @@ const evaluateAnswerQualityFlow = ai.defineFlow(
         missingAspects: ["Could not evaluate answer properly"],
         rationale: "Unable to properly evaluate the answer quality due to technical limitations. Proceeding without follow-up."
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Error in answer quality evaluation:', error);
+      
+      // Special handling for service unavailable errors
+      const errorMessage = String(error);
+      if (errorMessage.includes('Service Unavailable') || errorMessage.includes('overloaded')) {
+        console.warn('⚠️ Model overloaded, using graceful fallback');
+        return {
+          isComplete: true, // Move to next question when model is unavailable
+          completionScore: 6, // Slightly above middle score
+          missingAspects: ["Model temporarily unavailable"],
+          rationale: "The AI model is currently experiencing high demand. Your answer has been recorded, but detailed feedback is not available at this time."
+        };
+      }
+      
+      // Generic error fallback
       return {
         isComplete: true, // Default to complete on error
         completionScore: 5, // Middle score when uncertain

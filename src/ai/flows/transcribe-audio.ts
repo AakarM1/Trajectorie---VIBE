@@ -10,6 +10,7 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
+import {TRANSCRIPTION_MODEL} from '@/ai/config';
 
 const TranscribeAudioInputSchema = z.object({
   audioDataUri: z
@@ -35,7 +36,7 @@ const transcribeAudioPrompt = ai.definePrompt({
   name: 'transcribeAudioPrompt',
   input: {schema: TranscribeAudioInputSchema},
   output: {schema: TranscribeAudioOutputSchema},
-  model: 'googleai/gemini-2.0-flash', // Specify the model best suited for transcription
+  model: TRANSCRIPTION_MODEL, // Use model from centralized config
   prompt: `You are a highly accurate audio transcription service. Your only task is to transcribe the following audio file. Do not add any commentary or introductory text. Provide only the transcribed text.
 
 Audio for transcription: {{media url=audioDataUri}}`,
@@ -48,7 +49,27 @@ const transcribeAudioFlow = ai.defineFlow(
     outputSchema: TranscribeAudioOutputSchema,
   },
   async input => {
-    const {output} = await transcribeAudioPrompt(input);
-    return output!;
+    try {
+      console.log(`🤖 Using ${TRANSCRIPTION_MODEL} for transcription`);
+      const {output} = await transcribeAudioPrompt(input);
+      console.log("Transcription completed successfully");
+      return output!;
+    } catch (error: any) {
+      console.error("Transcription error:", error);
+      
+      // Fallback if model fails
+      const errorMessage = String(error);
+      if (errorMessage.includes('Service Unavailable') || errorMessage.includes('overloaded')) {
+        console.log("Attempting fallback transcription with default model");
+        
+        // Return a basic response to avoid breaking the flow
+        return {
+          transcription: "Transcription failed due to model overload. Please try again later or use text input instead."
+        };
+      }
+      
+      // Re-throw any other errors
+      throw error;
+    }
   }
 );
