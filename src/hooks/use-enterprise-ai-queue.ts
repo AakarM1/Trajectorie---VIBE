@@ -284,8 +284,11 @@ export function useEnterpriseTranscriptionQueue(options: UseEnterpriseTranscript
           status: updated.status,
           result: updated.result,
           error: updated.error,
+          requestedAt: new Date(updated.createdAt),
           createdAt: { toDate: () => updated.createdAt } as any,
           updatedAt: { toDate: () => updated.updatedAt } as any,
+          retryCount: updated.attempts || 0,
+          maxRetries: updated.maxAttempts || 3,
           metadata: updated.metadata
         };
         

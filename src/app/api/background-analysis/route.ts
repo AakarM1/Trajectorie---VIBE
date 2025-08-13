@@ -3,9 +3,10 @@ import { submissionService, convertFirestoreSubmission } from '@/lib/database';
 import { analyzeConversation } from '@/ai/flows/analyze-conversation';
 import { analyzeSJTResponse, type AnalyzeSJTResponseInput } from '@/ai/flows/analyze-sjt-response';
 import { analyzeSJTScenario, type AnalyzeSJTScenarioInput } from '@/ai/flows/analyze-sjt-scenario';
+import { generateCompetencySummaries } from '@/ai/flows/generate-competency-summaries';
 import { configurationService } from '@/lib/config-service';
 import { groupEntriesByScenario, calculatePenaltyScore, isFollowUpQuestion } from '@/lib/scenario-grouping-utils';
-import type { AnalysisResult } from '@/types';
+import type { AnalysisResult, QuestionwiseDetail, Competency } from '@/types';
 
 export async function POST(request: NextRequest) {
   try {
@@ -452,6 +453,85 @@ OVERALL ASSESSMENT: ${strongResponses.length > improvementAreas.length ?
   'The candidate shows engagement with complex workplace scenarios but would benefit from focused development in key competency areas before advancing. A structured development plan is recommended.' :
   'The candidate shows balanced performance across assessed competencies with equal strengths and development opportunities. Continued growth and targeted skill enhancement will support their professional advancement.'}`;
 
+        // Generate question-wise details for Section 3
+        const questionwiseDetails: QuestionwiseDetail[] = sjtAnalyses.map((analysis, index) => ({
+          questionNumber: index + 1,
+          question: submission.history[index]?.question || 'Question not recorded',
+          candidateAnswer: submission.history[index]?.answer || 'No answer provided',
+          competency: analysis.competency,
+          prePenaltyScore: analysis.prePenaltyScore,
+          postPenaltyScore: analysis.postPenaltyScore,
+          penaltyApplied: analysis.penaltyApplied,
+          hasFollowUp: analysis.hasFollowUp,
+          rationale: analysis.rationale,
+          // TODO: Add follow-up questions and answers from conversation history
+          followUpQuestions: [], // These would come from the enhanced conversation tracking
+          followUpAnswers: []
+        }));
+
+        // Generate qualitative summaries for each competency (Section 2)
+        console.log('🤖 Generating competency-specific qualitative summaries...');
+        const competencyQualitativeSummary: Competency[] = [];
+        
+        for (const [competencyName, data] of competencyMap.entries()) {
+          try {
+            // Get all responses for this competency
+            const competencyResponses = sjtAnalyses
+              .map((analysis, index) => ({
+                questionNumber: index + 1,
+                question: submission.history[index]?.question || 'Question not recorded',
+                candidateAnswer: submission.history[index]?.answer || 'No answer provided',
+                prePenaltyScore: analysis.prePenaltyScore,
+                postPenaltyScore: analysis.postPenaltyScore,
+                penaltyApplied: analysis.penaltyApplied,
+                hasFollowUp: analysis.hasFollowUp,
+                rationale: analysis.rationale,
+                followUpQuestions: [], // TODO: Extract from conversation history
+                followUpAnswers: []
+              }))
+              .filter((_, index) => sjtAnalyses[index].competency === competencyName);
+
+            const overallScore = Math.round((data.totalPostPenaltyScore / data.count) * 10) / 10;
+            
+            const summaries = await generateCompetencySummaries({
+              competencyName,
+              candidateName: submission.candidateName,
+              questionResponses: competencyResponses,
+              overallScore
+            });
+
+            competencyQualitativeSummary.push({
+              name: competencyName,
+              score: overallScore,
+              prePenaltyScore: Math.round((data.totalPrePenaltyScore / data.count) * 10) / 10,
+              postPenaltyScore: overallScore,
+              strengthSummary: summaries.strengthSummary,
+              weaknessSummary: summaries.weaknessSummary
+            });
+            
+          } catch (error) {
+            console.error(`❌ Failed to generate summary for competency ${competencyName}:`, error);
+            // Fallback with basic data
+            competencyQualitativeSummary.push({
+              name: competencyName,
+              score: Math.round((data.totalPostPenaltyScore / data.count) * 10) / 10,
+              prePenaltyScore: Math.round((data.totalPrePenaltyScore / data.count) * 10) / 10,
+              postPenaltyScore: Math.round((data.totalPostPenaltyScore / data.count) * 10) / 10,
+              strengthSummary: `The candidate demonstrated engagement with ${competencyName.toLowerCase()} scenarios.`,
+              weaknessSummary: `The candidate could benefit from more detailed consideration of ${competencyName.toLowerCase()}-related factors.`
+            });
+          }
+        }
+
+        // Generate scores summary for Section 1
+        const scoresSummary = {
+          overallPerformance: performanceLevel,
+          competencyScores: uniqueCompetencies,
+          penaltySummary: scenariosWithPenalty > 0 
+            ? `Follow-up penalties applied to ${scenariosWithPenalty} scenario(s) with ${followUpPenalty}% penalty reduction`
+            : 'No follow-up penalties applied'
+        };
+
         analysisResult = {
           strengths: strengthsText,
           weaknesses: weaknessesText,
@@ -459,7 +539,11 @@ OVERALL ASSESSMENT: ${strongResponses.length > improvementAreas.length ?
           competencyAnalysis: [{
             name: "Situational Competencies",
             competencies: uniqueCompetencies.sort((a,b) => a.name.localeCompare(b.name)),
-          }]
+          }],
+          // New chunked analysis sections
+          scoresSummary,
+          competencyQualitativeSummary: competencyQualitativeSummary.sort((a,b) => a.name.localeCompare(b.name)),
+          questionwiseDetails
         };
       } else {
         // Fall back to basic result if no AI analysis

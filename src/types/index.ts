@@ -7,11 +7,27 @@ export interface Competency {
   score: number; // Score out of 10 (post-penalty for backward compatibility)
   prePenaltyScore?: number; // Pre-penalty score for SJT assessments
   postPenaltyScore?: number; // Post-penalty score for SJT assessments
+  strengthSummary?: string; // 2-3 line summary of strengths for this competency
+  weaknessSummary?: string; // 2-3 line summary of weaknesses for this competency
 }
 
 export interface MetaCompetency {
   name: string;
   competencies: Competency[];
+}
+
+export interface QuestionwiseDetail {
+  questionNumber: number;
+  question: string;
+  candidateAnswer: string;
+  competency: string;
+  prePenaltyScore: number;
+  postPenaltyScore: number;
+  penaltyApplied: number;
+  hasFollowUp: boolean;
+  rationale: string;
+  followUpQuestions?: string[];
+  followUpAnswers?: string[];
 }
 
 export interface ConversationEntry {
@@ -46,6 +62,14 @@ export interface AnalysisResult {
   weaknesses: string;
   summary: string;
   competencyAnalysis: MetaCompetency[];
+  // New chunked analysis sections
+  scoresSummary?: {
+    overallPerformance: string;
+    competencyScores: Competency[];
+    penaltySummary: string;
+  };
+  competencyQualitativeSummary?: Competency[]; // Individual competency summaries
+  questionwiseDetails?: QuestionwiseDetail[]; // Detailed question-wise breakdown
 }
 
 export interface SJTQuestion {

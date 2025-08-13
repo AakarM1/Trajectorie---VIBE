@@ -28,6 +28,7 @@ interface Scenario {
 interface TestSettings {
   timeLimit: number; // in minutes, 0 for no limit
   numberOfQuestions: number;
+  questionTimeLimit: number; // per-question time limit in seconds
   aiGeneratedQuestions: number; // Number of AI-generated follow-up questions
   followUpPenalty: number; // Percentage penalty for follow-up questions (0-100)
 }
@@ -36,7 +37,7 @@ interface TestSettings {
 const SJTConfigPage = () => {
   const { toast } = useToast();
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
-  const [settings, setSettings] = useState<TestSettings>({ timeLimit: 0, numberOfQuestions: 5, aiGeneratedQuestions: 0, followUpPenalty: 0 });
+  const [settings, setSettings] = useState<TestSettings>({ timeLimit: 0, numberOfQuestions: 5, questionTimeLimit: 120, aiGeneratedQuestions: 0, followUpPenalty: 0 });
 
 
   useEffect(() => {
@@ -55,6 +56,7 @@ const SJTConfigPage = () => {
              setSettings({
                 timeLimit: savedSettings.timeLimit || 0,
                 numberOfQuestions: savedSettings.numberOfQuestions || 5,
+                questionTimeLimit: savedSettings.questionTimeLimit || 120,
                 aiGeneratedQuestions: savedSettings.aiGeneratedQuestions || 0,
                 followUpPenalty: savedSettings.followUpPenalty || 0,
              });

@@ -1,12 +1,53 @@
 /**
  * Phase 1: In-Memory AI Request Queue Service
  * 
- * Provides immediate relief for API overload issues with:
- * - Request queuing and rate limiting
+ * Provides immediate relief for API overload iss    const request: QueuedTranscriptionRequest = {
+      id: `transcribe_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      input,
+      operationType: 'transcribe',
+      priority: options.priority || 'normal',
+      attempts: 0,
+      maxAttempts: options.maxAttempts || 3,
+      createdAt: new Date(),
+      status: 'queued',
+      onProgress: options.onProgress,
+      onComplete: options.onComplete,
+      onError: options.onError,
+    };* - Request queuing and rate limiting
  * - Exponential backoff retry logic
  * - Priority handling for urgent requests
  * - Real-time status updates for UI
  */
+
+export interface TranscribeAudioInput {
+  audioFile: File | Blob;
+  language?: string;
+  format?: string;
+}
+
+export interface TranscribeAudioOutput {
+  text: string;
+  confidence?: number;
+  language?: string;
+}
+
+export interface QueuedTranscriptionRequest {
+  id: string;
+  input: TranscribeAudioInput;
+  operationType: 'transcribe';
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  attempts: number;
+  maxAttempts: number;
+  createdAt: Date;
+  lastAttemptAt?: Date;
+  status: 'queued' | 'processing' | 'completed' | 'failed' | 'retry_scheduled';
+  result?: TranscribeAudioOutput;
+  error?: string;
+  retryAfter?: Date;
+  onProgress?: (status: QueuedTranscriptionRequest) => void;
+  onComplete?: (result: TranscribeAudioOutput) => void;
+  onError?: (error: string) => void;
+}
 
 export interface QueuedAIRequest<TInput = any, TOutput = any> {
   id: string;
@@ -78,6 +119,7 @@ export class TranscriptionQueueService {
     const request: QueuedTranscriptionRequest = {
       id: `transcription_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       input,
+      operationType: 'transcribe',
       priority: options.priority || 'normal',
       attempts: 0,
       maxAttempts: options.maxAttempts || 3,
@@ -337,6 +379,16 @@ export class TranscriptionQueueService {
     
     console.log('✅ [TranscriptionQueue] Shutdown complete');
   }
+}
+
+// Placeholder transcribeAudio function - should be implemented with actual AI service
+async function transcribeAudio(input: TranscribeAudioInput): Promise<TranscribeAudioOutput> {
+  // This is a placeholder - replace with actual transcription service
+  return {
+    text: "Transcription not implemented",
+    confidence: 0,
+    language: input.language || 'en'
+  };
 }
 
 // Singleton instance for the application
