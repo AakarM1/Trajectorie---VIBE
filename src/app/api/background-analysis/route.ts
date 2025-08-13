@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { submissionService, convertFirestoreSubmission } from '@/lib/database';
 import { analyzeConversation } from '@/ai/flows/analyze-conversation';
 import { analyzeSJTResponse, type AnalyzeSJTResponseInput } from '@/ai/flows/analyze-sjt-response';
+import { analyzeSJTScenario, type AnalyzeSJTScenarioInput } from '@/ai/flows/analyze-sjt-scenario';
 import { configurationService } from '@/lib/config-service';
+import { groupEntriesByScenario, calculatePenaltyScore, isFollowUpQuestion } from '@/lib/scenario-grouping-utils';
 import type { AnalysisResult } from '@/types';
 
 export async function POST(request: NextRequest) {
@@ -53,7 +55,7 @@ export async function POST(request: NextRequest) {
       
       analysisResult = await analyzeConversation(builtAnalysisInput);
     } else if (type === 'sjt') {
-      // New approach: SJT analysis
+      // New approach: SJT analysis with proper scenario grouping
       const fsSubmission = await submissionService.getById(submissionId);
       if (!fsSubmission) {
         return NextResponse.json(
@@ -64,86 +66,181 @@ export async function POST(request: NextRequest) {
       
       const submission = convertFirestoreSubmission(fsSubmission);
       
-      // Get SJT configuration for penalty settings
-      const sjtConfig = await configurationService.getSJTConfig();
-      const followUpPenalty = sjtConfig?.settings?.followUpPenalty || 0;
+      console.log(`🤖 Analyzing SJT submission with ${submission.history.length} entries...`);
       
-      console.log(`🤖 Analyzing ${submission.history.length} SJT scenarios with ${followUpPenalty}% follow-up penalty...`);
-      const sjtAnalyses: Array<any> = [];
+      // Get SJT configuration to retrieve follow-up penalty
+      let followUpPenalty = 0;
+      try {
+        const sjtConfig = await configurationService.getSJTConfig();
+        followUpPenalty = sjtConfig?.followUpPenalty || 0;
+        console.log(`📊 Using follow-up penalty: ${followUpPenalty}%`);
+      } catch (error) {
+        console.warn('⚠️ Could not retrieve SJT config, using default penalty of 0%');
+      }
       
-      // Process each scenario using admin-defined criteria from the submission
-      for (let i = 0; i < submission.history.length; i++) {
-        const entry = submission.history[i];
+      // Group entries by scenario
+      const scenarioGroups = groupEntriesByScenario(submission.history);
+      console.log(`📊 Identified ${scenarioGroups.size} unique scenarios`);
+      
+      const sjtAnalyses: Array<{
+        competency: string;
+        score: number;
+        rationale: string;
+        scenarioKey: string;
+        questionCount: number;
+        hasFollowUps: boolean;
+        conversationQuality?: string;
+        overallAssessment?: string;
+        isFallback?: boolean;
+        prePenaltyScore: number;
+        postPenaltyScore: number;
+        penaltyApplied: number;
+        hasFollowUp: boolean;
+        questionNumber?: number;
+        isEmergencyFallback?: boolean;
+      }> = [];
+      
+      // Process each scenario as a complete conversation
+      for (const [scenarioKey, entries] of scenarioGroups) {
+        console.log(`🔍 Analyzing scenario: "${scenarioKey}" with ${entries.length} questions/answers`);
         
-        // Skip entries without answers
-        if (!entry?.answer) {
-          console.log(`⚠️ Skipping scenario ${i + 1} - no answer provided`);
+        // Skip scenarios without any answers
+        const answeredEntries = entries.filter(e => e.answer);
+        if (answeredEntries.length === 0) {
+          console.log(`⚠️ Skipping scenario "${scenarioKey}" - no answers provided`);
           continue;
         }
         
-        // Extract assessedCompetency from the entry - prefer specific admin-defined competency field
-        const assessedCompetencyRaw = entry.assessedCompetency || entry.competency || `Situational Judgment ${i+1}`;
+        // Get scenario metadata from the first entry
+        const firstEntry = entries[0];
+        const situation = firstEntry.situation || "No situation provided";
+        const bestResponseRationale = firstEntry.bestResponseRationale || "No best response criteria provided";
+        const worstResponseRationale = firstEntry.worstResponseRationale || "No worst response criteria provided";
         
-        // Parse multiple competencies separated by commas
+        // Parse competencies (can be multiple separated by commas)
+        const assessedCompetencyRaw = firstEntry.assessedCompetency || 'General Assessment';
         const assessedCompetencies = assessedCompetencyRaw
           .split(',')
           .map(comp => comp.trim())
           .filter(comp => comp.length > 0);
         
-        // If no valid competencies found, use default
-        const competenciesToAnalyze = assessedCompetencies.length > 0 ? assessedCompetencies : [`Situational Judgment ${i+1}`];
-        
-        console.log(`📊 Question ${i + 1} will be analyzed for competencies: ${competenciesToAnalyze.join(', ')}`);
+        // Build conversation history for this scenario with follow-up detection
+        const conversationHistory = answeredEntries.map((entry, index) => ({
+          question: entry.question,
+          answer: entry.answer!,
+          isFollowUp: entry.isFollowUp || index > 0 // First question is never a follow-up
+        }));
         
         try {
-          // Create analysis for each competency
-          for (const competency of competenciesToAnalyze) {
-            // Create analysis input with all available data from entry
-            const sjtAnalysisInput: AnalyzeSJTResponseInput = {
-              situation: entry.situation || entry.question || "No situation provided",
-              question: entry.question || "No question provided", 
-              bestResponseRationale: entry.bestResponseRationale || "No best response criteria provided",
-              worstResponseRationale: entry.worstResponseRationale || "No worst response criteria provided",
-              assessedCompetency: competency,
-              candidateAnswer: entry.answer,
-            };
+          // Try new scenario analysis first with timeout
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Analysis timeout - using fallback')), 30000)
+          );
+          
+          const analysisPromise = analyzeSJTScenario({
+            situation,
+            conversationHistory,
+            bestResponseRationale,
+            worstResponseRationale,
+            assessedCompetencies
+          });
+          
+          const scenarioResult = await Promise.race([analysisPromise, timeoutPromise]) as any;
+          
+          // Add scenario metadata to results with penalty calculations
+          scenarioResult.competencyScores.forEach((competencyScore: any, competencyIndex: number) => {
+            // Calculate penalty based on whether scenario has follow-ups
+            const hasFollowUps = conversationHistory.some(c => c.isFollowUp);
+            const penaltyCalculation = calculatePenaltyScore(
+              competencyScore.score, 
+              hasFollowUps, 
+              followUpPenalty
+            );
             
-            const result = await analyzeSJTResponse(sjtAnalysisInput);
-            
-            // Calculate penalty if follow-up questions were generated for this scenario
-            // Check both the followUpGenerated flag and if there are multiple entries with the same situation
-            const scenarioEntries = submission.history.filter(h => h.situation === entry.situation);
-            const hasMultipleQuestions = scenarioEntries.length > 1;
-            const hasFollowUp = entry.followUpGenerated || hasMultipleQuestions;
-            
-            if (hasMultipleQuestions) {
-              console.log(`🔍 Scenario ${i + 1}: Found ${scenarioEntries.length} questions for this situation - follow-up penalty will be applied`);
-            }
-            
-            const prePenaltyScore = result.score;
-            const postPenaltyScore = hasFollowUp && followUpPenalty > 0 
-              ? Math.max(0, prePenaltyScore * (1 - followUpPenalty / 100))
-              : prePenaltyScore;
-            
-            sjtAnalyses.push({ 
-              ...result, 
-              competency: competency,
-              prePenaltyScore,
-              postPenaltyScore,
-              hasFollowUp,
-              penaltyApplied: hasFollowUp ? followUpPenalty : 0,
-              questionNumber: i + 1, // Add question number for better reporting
-              originalCompetencies: assessedCompetencies // Keep track of all competencies for this question
+            sjtAnalyses.push({
+              competency: competencyScore.competency,
+              score: competencyScore.score,
+              rationale: competencyScore.rationale,
+              scenarioKey,
+              questionCount: answeredEntries.length,
+              hasFollowUps,
+              conversationQuality: scenarioResult.conversationQuality,
+              overallAssessment: scenarioResult.overallAssessment,
+              questionNumber: competencyIndex + 1,
+              ...penaltyCalculation
             });
-            console.log(`✅ Analysis complete for scenario ${i + 1}, competency "${competency}" (Score: ${prePenaltyScore}${hasFollowUp ? ` → ${postPenaltyScore.toFixed(1)} after ${followUpPenalty}% penalty` : ''})`);
-          }
+          });
+          
+          console.log(`✅ Scenario "${scenarioKey}" analyzed: ${scenarioResult.competencyScores.length} competency scores generated`);
+          
         } catch (analysisError) {
-          console.warn(`⚠️ Failed to analyze scenario ${i + 1}:`, analysisError);
+          console.warn(`⚠️ Failed to analyze scenario "${scenarioKey}":`, analysisError);
+          
+          // Immediate fallback to individual question analysis
+          console.log(`🔄 Falling back to individual analysis for scenario "${scenarioKey}"`);
+          
+          for (const [entryIndex, entry] of answeredEntries.entries()) {
+            for (const competency of assessedCompetencies) {
+              try {
+                const sjtAnalysisInput: AnalyzeSJTResponseInput = {
+                  situation,
+                  question: entry.question,
+                  bestResponseRationale,
+                  worstResponseRationale,
+                  assessedCompetency: competency,
+                  candidateAnswer: entry.answer!,
+                };
+                
+                const result = await analyzeSJTResponse(sjtAnalysisInput);
+                
+                // Calculate penalty for fallback analysis
+                const isFollowUp = entry.isFollowUp || entryIndex > 0;
+                const penaltyCalculation = calculatePenaltyScore(
+                  result.score, 
+                  isFollowUp, 
+                  followUpPenalty
+                );
+                
+                sjtAnalyses.push({
+                  competency,
+                  score: result.score,
+                  rationale: result.rationale,
+                  scenarioKey,
+                  questionCount: 1,
+                  hasFollowUps: false,
+                  conversationQuality: 'Fair',
+                  isFallback: true,
+                  questionNumber: entryIndex + 1,
+                  ...penaltyCalculation
+                });
+              } catch (fallbackError) {
+                console.warn(`⚠️ Fallback analysis also failed for entry in scenario "${scenarioKey}":`, fallbackError);
+                
+                // Emergency fallback - create basic analysis to prevent complete failure
+                const isFollowUp = entry.isFollowUp || entryIndex > 0;
+                const penaltyCalculation = calculatePenaltyScore(5, isFollowUp, followUpPenalty); // Default score
+                
+                sjtAnalyses.push({
+                  competency: assessedCompetencies[0] || 'General Assessment',
+                  score: 5,
+                  rationale: 'Emergency analysis - API temporarily unavailable. Default assessment provided.',
+                  scenarioKey,
+                  questionCount: 1,
+                  hasFollowUps: false,
+                  conversationQuality: 'Fair',
+                  isFallback: true,
+                  isEmergencyFallback: true,
+                  questionNumber: entryIndex + 1,
+                  ...penaltyCalculation
+                });
+              }
+            }
+          }
         }
       }
       
-        // Create enhanced result if we got analyses
-        if (sjtAnalyses.length > 0) {
+      // Create enhanced result if we got analyses
+      if (sjtAnalyses.length > 0) {
           // Separate responses using post-penalty scores for categorization
           const strongResponses = sjtAnalyses.filter(a => a.postPenaltyScore >= 7);
           const improvementAreas = sjtAnalyses.filter(a => a.postPenaltyScore < 7);
