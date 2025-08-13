@@ -502,7 +502,8 @@ const ConversationSummary: React.FC<ConversationSummaryProps> = ({ analysisResul
               <QuestionwiseDetailsSection details={analysisResult.questionwiseDetails} />
             )}
 
-            {/* Legacy sections for backward compatibility */}
+            {/* COMMENTED OUT - Legacy sections for backward compatibility (Sections 4, 5, 6, 7) */}
+            {/* 
             <div className="space-y-4">
                 <h3 className="text-xl font-semibold mb-3 text-foreground font-headline flex items-center">
                 <BarChartHorizontal className="mr-2 h-6 w-6 text-primary" />
@@ -567,6 +568,7 @@ const ConversationSummary: React.FC<ConversationSummaryProps> = ({ analysisResul
               ))}
               </Accordion>
           </div>
+          */}
         </CardContent>
           <CardFooter className="flex-col sm:flex-row items-center justify-between gap-4 pt-6">
               <p className="text-xs text-muted-foreground">This analysis is AI-generated and includes follow-up penalty calculations for comprehensive assessment.</p>

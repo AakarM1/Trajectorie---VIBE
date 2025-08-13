@@ -100,10 +100,11 @@ const analyzeSJTScenarioFlow = ai.defineFlow(
       } catch (error: any) {
         lastError = error;
         
-        // If it's a 503 (overloaded) error, wait and retry
-        if (error.status === 503 && attempt < 3) {
-          console.log(`⏳ API overloaded, retrying in ${attempt * 2} seconds (attempt ${attempt}/3)...`);
-          await new Promise(resolve => setTimeout(resolve, attempt * 2000));
+        // Handle both 503 (overloaded) and 429 (rate limit) errors  
+        if ((error.status === 503 || error.status === 429) && attempt < 3) {
+          const waitTime = error.status === 429 ? attempt * 1500 : attempt * 1000; // Optimized timing
+          console.log(`⏳ Scenario API ${error.status === 429 ? 'rate limited' : 'overloaded'}, retrying in ${waitTime/1000} seconds (attempt ${attempt}/3)...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
           continue;
         }
         
