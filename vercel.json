@@ -4,11 +4,14 @@
   "framework": "nextjs",
   "functions": {
     "app/api/**/*.ts": {
-      "maxDuration": 30
+      "maxDuration": 60
+    },
+    "app/api/background-analysis/route.ts": {
+      "maxDuration": 300
     }
   },
   "env": {
-    "NEXT_PUBLIC_FIREBASE_PROJECT_ID": "demo-app"
+    "NEXT_PUBLIC_FIREBASE_PROJECT_ID": "trajectorie-vibe-8366c"
   },
   "build": {
     "env": {

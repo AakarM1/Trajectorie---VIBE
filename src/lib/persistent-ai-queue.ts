@@ -26,7 +26,7 @@ import {
   getDoc
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { TranscriptionQueueService, type QueuedAIRequest } from './ai-queue';
+import { AIQueueService, type QueuedTranscriptionRequest } from './ai-queue';
 import { transcribeAudio, type TranscribeAudioInput, type TranscribeAudioOutput } from '@/ai/flows/transcribe-audio';
 
 export interface PersistedTranscriptionRequest {
@@ -63,7 +63,7 @@ export interface QueueAnalytics {
   peakHours: Array<{ hour: number; count: number }>;
 }
 
-export class PersistentTranscriptionQueue extends TranscriptionQueueService {
+export class PersistentTranscriptionQueue extends AIQueueService {
   private serverId: string;
   private readonly COLLECTION_NAME = 'transcription_queue';
   private readonly ANALYTICS_COLLECTION = 'transcription_analytics';
@@ -101,7 +101,7 @@ export class PersistentTranscriptionQueue extends TranscriptionQueueService {
       maxAttempts?: number;
       sessionId?: string;
       userAgent?: string;
-      onProgress?: (status: QueuedAIRequest) => void;
+      onProgress?: (status: QueuedTranscriptionRequest) => void;
       onComplete?: (result: TranscribeAudioOutput) => void;
       onError?: (error: string) => void;
     } = {}
@@ -130,16 +130,16 @@ export class PersistentTranscriptionQueue extends TranscriptionQueueService {
     // Then add to in-memory queue for immediate processing
     return super.queueTranscription(input, {
       ...options,
-      onProgress: (status) => {
+      onProgress: (status: any) => {
         // Update database on status changes
         this.updateRequestStatus(requestId, status);
         options.onProgress?.(status);
       },
-      onComplete: (result) => {
+      onComplete: (result: any) => {
         this.markRequestCompleted(requestId, result);
         options.onComplete?.(result);
       },
-      onError: (error) => {
+      onError: (error: any) => {
         this.markRequestFailed(requestId, error);
         options.onError?.(error);
       }
@@ -191,9 +191,9 @@ export class PersistentTranscriptionQueue extends TranscriptionQueueService {
       await super.queueTranscription(data.input, {
         priority: data.priority,
         maxAttempts: data.maxAttempts,
-        onProgress: (status) => this.updateRequestStatus(doc.id, status),
-        onComplete: (result) => this.markRequestCompleted(doc.id, result),
-        onError: (error) => this.markRequestFailed(doc.id, error)
+        onProgress: (status: any) => this.updateRequestStatus(doc.id, status),
+        onComplete: (result: any) => this.markRequestCompleted(doc.id, result),
+        onError: (error: any) => this.markRequestFailed(doc.id, error)
       });
     }
 
@@ -226,9 +226,9 @@ export class PersistentTranscriptionQueue extends TranscriptionQueueService {
             await super.queueTranscription(data.input, {
               priority: data.priority,
               maxAttempts: data.maxAttempts,
-              onProgress: (status) => this.updateRequestStatus(docId, status),
-              onComplete: (result) => this.markRequestCompleted(docId, result),
-              onError: (error) => this.markRequestFailed(docId, error)
+              onProgress: (status: any) => this.updateRequestStatus(docId, status),
+              onComplete: (result: any) => this.markRequestCompleted(docId, result),
+              onError: (error: any) => this.markRequestFailed(docId, error)
             });
           }
         }
@@ -236,7 +236,7 @@ export class PersistentTranscriptionQueue extends TranscriptionQueueService {
     });
   }
 
-  private async updateRequestStatus(requestId: string, status: QueuedAIRequest): Promise<void> {
+  private async updateRequestStatus(requestId: string, status: QueuedTranscriptionRequest): Promise<void> {
     try {
       const updateData: Partial<PersistedTranscriptionRequest> = {
         status: status.status as any,
