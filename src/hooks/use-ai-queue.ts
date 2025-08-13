@@ -158,7 +158,7 @@ export function useTranscriptionQueue(): UseTranscriptionQueueReturn {
     Object.entries(stats.priorityBreakdown || {}).forEach(([p, count]) => {
       const pLevel = priorityOrder[p as keyof typeof priorityOrder];
       if (pLevel < requestPriorityLevel) {
-        position += count;
+        position += Number(count) || 0;
       }
     });
     
