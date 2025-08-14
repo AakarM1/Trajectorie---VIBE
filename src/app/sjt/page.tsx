@@ -134,13 +134,23 @@ function SJTInterviewPage() {
       if (savedConfig) {
         const { scenarios, settings } = savedConfig;
         if (scenarios && scenarios.length > 0) {
-          let allScenarios = scenarios;
-          const numQuestionsToUse = settings?.numberOfQuestions > 0 ? settings.numberOfQuestions : allScenarios.length;
+          // Validate scenarios have required fields
+          const validScenarios = scenarios.filter((s: Scenario) => 
+            s && s.situation && s.question && s.assessedCompetency
+          );
           
-          if (numQuestionsToUse < allScenarios.length) {
-            allScenarios.sort(() => 0.5 - Math.random());
+          if (validScenarios.length === 0) {
+            console.warn('⚠️ No valid scenarios found in configuration, using fallback');
+            scenariosToUse = fallbackSjtScenarios;
+          } else {
+            let allScenarios = validScenarios;
+            const numQuestionsToUse = settings?.numberOfQuestions > 0 ? settings.numberOfQuestions : allScenarios.length;
+            
+            if (numQuestionsToUse < allScenarios.length) {
+              allScenarios.sort(() => 0.5 - Math.random());
+            }
+            scenariosToUse = allScenarios.slice(0, numQuestionsToUse);
           }
-          scenariosToUse = allScenarios.slice(0, numQuestionsToUse);
           
           // Check if AI follow-up questions are enabled
           const numAiQuestions = settings?.aiGeneratedQuestions || 0;
@@ -189,42 +199,104 @@ function SJTInterviewPage() {
     // Translate scenarios if language is not English
     if (details.language && details.language.toLowerCase() !== 'english') {
         toast({ title: `Translating scenarios to ${details.language}...` });
-        const translatedScenarios = await Promise.all(scenariosToUse.map(async (s) => {
-            const [translatedSituation, translatedQuestion] = await Promise.all([
-                fetch('/api/ai/translate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ textToTranslate: s.situation, targetLanguage: details.language })
-                }).then(res => res.json()),
-                fetch('/api/ai/translate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ textToTranslate: s.question, targetLanguage: details.language })
-                }).then(res => res.json())
-            ]);
-            return {
-                ...s,
-                situation: translatedSituation.translatedText,
-                question: translatedQuestion.translatedText,
-            };
-        }));
-        scenariosToUse = translatedScenarios;
+        try {
+          const translatedScenarios = await Promise.all(scenariosToUse.map(async (s) => {
+              // Ensure scenario has valid situation and question before translating
+              if (!s.situation || !s.question) {
+                console.warn('⚠️ Scenario missing situation or question, skipping translation:', s);
+                return s;
+              }
+              
+              try {
+                const [translatedSituation, translatedQuestion] = await Promise.all([
+                    fetch('/api/ai/translate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ textToTranslate: s.situation, targetLanguage: details.language })
+                    }).then(res => {
+                      if (!res.ok) {
+                        console.warn(`Translation API error for situation: ${res.status}`);
+                        return { translatedText: s.situation };
+                      }
+                      return res.json();
+                    }).catch(err => {
+                      console.warn('Translation failed for situation:', err);
+                      return { translatedText: s.situation };
+                    }),
+                    fetch('/api/ai/translate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ textToTranslate: s.question, targetLanguage: details.language })
+                    }).then(res => {
+                      if (!res.ok) {
+                        console.warn(`Translation API error for question: ${res.status}`);
+                        return { translatedText: s.question };
+                      }
+                      return res.json();
+                    }).catch(err => {
+                      console.warn('Translation failed for question:', err);
+                      return { translatedText: s.question };
+                    })
+                ]);
+                
+                return {
+                    ...s,
+                    situation: translatedSituation.translatedText || s.situation || "Workplace Scenario",
+                    question: translatedQuestion.translatedText || s.question || "What would you do in this situation?",
+                };
+              } catch (error) {
+                console.warn('Translation failed for scenario:', error);
+                return {
+                  ...s,
+                  situation: s.situation || "Workplace Scenario",
+                  question: s.question || "What would you do in this situation?"
+                };
+              }
+          }));
+          scenariosToUse = translatedScenarios;
+        } catch (error) {
+          console.error('Translation process failed:', error);
+          toast({
+            variant: 'destructive',
+            title: 'Translation Error',
+            description: 'Failed to translate scenarios. Using original language.',
+          });
+          // Ensure scenarios still have valid data even if translation fails
+          scenariosToUse = scenariosToUse.map(s => ({
+            ...s,
+            situation: s.situation || "Workplace Scenario",
+            question: s.question || "What would you do in this situation?"
+          }));
+        }
     }
 
     setSjtScenarios(scenariosToUse);
 
     // Create history with all the scenario data needed for AI analysis
-    const history = scenariosToUse.map(s => ({ 
-      question: `Situation: ${s.situation}\n\nQuestion: ${s.question}`,
-      answer: null, 
-      videoDataUri: undefined,
-      // Add admin-defined criteria fields for AI analysis
-      situation: s.situation,
-      bestResponseRationale: s.bestResponseRationale,
-      worstResponseRationale: s.worstResponseRationale,
-      assessedCompetency: s.assessedCompetency
+    const history = scenariosToUse.map(s => {
+      // Ensure situation and question are valid strings
+      const situation = s.situation || "Workplace Scenario";
+      const question = s.question || "What would you do in this situation?";
+      
+      return { 
+        question: `Situation: ${situation}\n\nQuestion: ${question}`,
+        answer: null, 
+        videoDataUri: undefined,
+        // Add admin-defined criteria fields for AI analysis
+        situation: situation,
+        bestResponseRationale: s.bestResponseRationale || "Demonstrate professional competency and sound judgment.",
+        worstResponseRationale: s.worstResponseRationale || "Show poor judgment or unprofessional behavior.",
+        assessedCompetency: s.assessedCompetency || "General Competency"
+      };
+    });
+    
+    // Validate that all conversation entries have proper situation field
+    const validatedHistory = history.map(entry => ({
+      ...entry,
+      situation: entry.situation || "Workplace Scenario"
     }));
-    setConversationHistory(history);
+    
+    setConversationHistory(validatedHistory);
     
     // Initialize question times array
     setQuestionTimes(new Array(scenariosToUse.length).fill(0));
@@ -387,8 +459,11 @@ function SJTInterviewPage() {
       return questionText.includes(s.situation) && questionText.includes(s.question);
     });
     
-    if (!currentScenario) {
-      console.error("Could not identify current scenario for answer evaluation");
+    // Fallback: use scenario by index if direct matching fails
+    const fallbackScenario = currentScenario || sjtScenarios[currentQuestionIndex] || sjtScenarios[Math.min(currentQuestionIndex, sjtScenarios.length - 1)];
+    
+    if (!fallbackScenario || !fallbackScenario.situation || !fallbackScenario.question) {
+      console.error("Could not identify current scenario for answer evaluation or scenario is missing required fields");
       toast({
         title: "Answer Saved!",
         description: "You can move to the next question or review your answer.",
@@ -401,6 +476,9 @@ function SJTInterviewPage() {
       }
       return;
     }
+    
+    // Use the fallback scenario if original lookup failed
+    const workingScenario = fallbackScenario;
     
     // Determine if this is already a follow-up or a base question
     const isFollowUp = updatedHistory[currentQuestionIndex].question.match(/\d+\.[a-z]\)/);
@@ -415,13 +493,17 @@ function SJTInterviewPage() {
         baseQuestionNumber = parseInt(match[1]);
       } else {
         console.error("Could not extract base question number from follow-up");
-        baseQuestionNumber = currentScenario.id;
+        baseQuestionNumber = workingScenario.id || currentQuestionIndex + 1;
       }
       
       console.log(`This is follow-up question for base question ${baseQuestionNumber}`);
     } else {
       // For base questions, get the question number from the scenario ID
-      baseQuestionNumber = sjtScenarios.findIndex(s => s.id === currentScenario.id) + 1;
+      baseQuestionNumber = sjtScenarios.findIndex(s => s.id === workingScenario.id) + 1;
+      // Fallback: use current question index + 1 if scenario ID lookup fails
+      if (baseQuestionNumber === 0) {
+        baseQuestionNumber = currentQuestionIndex + 1;
+      }
     }
     
     try {
@@ -457,10 +539,10 @@ function SJTInterviewPage() {
       
       // Prepare input for evaluation
       const evaluationInput = {
-        situation: currentScenario.situation,
-        question: currentScenario.question,
-        bestResponseRationale: currentScenario.bestResponseRationale,
-        assessedCompetency: currentScenario.assessedCompetency,
+        situation: workingScenario.situation || "Workplace Scenario",
+        question: workingScenario.question || "What would you do in this situation?",
+        bestResponseRationale: workingScenario.bestResponseRationale || "Demonstrate professional competency and sound judgment.",
+        assessedCompetency: workingScenario.assessedCompetency || "General Competency",
         candidateAnswer: answer,
         questionNumber: baseQuestionNumber,
         followUpCount: currentFollowUpCount,
@@ -485,14 +567,51 @@ function SJTInterviewPage() {
       
       // Check if answer is complete or if we need a follow-up question
       if (!evaluation.isComplete && evaluation.followUpQuestion) {
+        // Translate follow-up question if needed
+        let translatedFollowUpQuestion = evaluation.followUpQuestion;
+        if (preInterviewDetails?.language && preInterviewDetails.language.toLowerCase() !== 'english') {
+          try {
+            const translationResponse = await fetch('/api/ai/translate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                textToTranslate: evaluation.followUpQuestion, 
+                targetLanguage: preInterviewDetails.language 
+              })
+            });
+            
+            if (translationResponse.ok) {
+              const translationResult = await translationResponse.json();
+              translatedFollowUpQuestion = translationResult.translatedText || evaluation.followUpQuestion;
+              console.log('✅ Follow-up question translated successfully');
+            } else {
+              const status = translationResponse.status;
+              if (status === 429) {
+                console.warn('⚠️ Translation API quota exhausted, using original English text');
+                toast({
+                  title: "Translation Temporarily Unavailable",
+                  description: "Follow-up question will be shown in English due to API limits.",
+                  duration: 3000,
+                  className: "bg-yellow-50 border border-yellow-200 text-yellow-800",
+                });
+              } else {
+                console.warn(`⚠️ Follow-up question translation failed with status ${status}, using original`);
+              }
+            }
+          } catch (error) {
+            console.warn('⚠️ Follow-up question translation error:', error);
+            // Keep original question if translation fails
+          }
+        }
+        
         // Create a new follow-up question
         const newFollowUpScenario: Scenario = {
-          id: currentScenario.id + 1000 + currentFollowUpCount, // Unique ID for follow-up
-          situation: currentScenario.situation,
-          question: evaluation.followUpQuestion,
-          bestResponseRationale: currentScenario.bestResponseRationale,
-          worstResponseRationale: currentScenario.worstResponseRationale,
-          assessedCompetency: currentScenario.assessedCompetency
+          id: workingScenario.id + 1000 + currentFollowUpCount, // Unique ID for follow-up
+          situation: workingScenario.situation || "Workplace Scenario",
+          question: translatedFollowUpQuestion,
+          bestResponseRationale: workingScenario.bestResponseRationale || "Demonstrate professional competency and sound judgment.",
+          worstResponseRationale: workingScenario.worstResponseRationale || "Show poor judgment or unprofessional behavior.",
+          assessedCompetency: workingScenario.assessedCompetency || "General Competency"
         };
         
         // Add the new scenario to our list

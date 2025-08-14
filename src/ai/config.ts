@@ -6,14 +6,14 @@
  * Model settings are loaded from environment variables with fallbacks.
  */
 
-// Default model used for most operations
-export const DEFAULT_MODEL = process.env.GEMINI_DEFAULT_MODEL || 'googleai/gemini-1.5-pro';
+// Default model used for most operations - Updated to Gemini 2.0 Flash-Lite for better performance
+export const DEFAULT_MODEL = process.env.GEMINI_DEFAULT_MODEL || 'googleai/gemini-2.0-flash-lite';
 
 // Model specifically optimized for audio transcription
-export const TRANSCRIPTION_MODEL = process.env.GEMINI_TRANSCRIPTION_MODEL || 'googleai/gemini-1.5-pro';
+export const TRANSCRIPTION_MODEL = process.env.GEMINI_TRANSCRIPTION_MODEL || 'googleai/gemini-2.0-flash-lite';
 
 // Model used for SJT evaluation and analysis
-export const SJT_EVALUATION_MODEL = process.env.GEMINI_SJT_EVALUATION_MODEL || 'googleai/gemini-1.5-pro';
+export const SJT_EVALUATION_MODEL = process.env.GEMINI_SJT_EVALUATION_MODEL || 'googleai/gemini-2.0-flash-lite';
 
 /**
  * Gets the appropriate model to use based on the task

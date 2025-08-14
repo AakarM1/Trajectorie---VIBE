@@ -1,11 +1,13 @@
 'use server';
 /**
  * @fileOverview A Genkit flow to analyze a complete SJT scenario conversation.
+ * Updated to focus on competency demonstration and professional judgment rather than exact response matching.
  * This analyzes an entire scenario conversation (including follow-ups) for comprehensive assessment.
  */
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
+import { translateToEnglish } from './translate-text';
 
 const ConversationEntrySchema = z.object({
   question: z.string().describe('The question asked to the candidate'),
@@ -45,7 +47,7 @@ const prompt = ai.definePrompt({
   name: 'analyzeSJTScenarioPrompt',
   input: { schema: AnalyzeSJTScenarioInputSchema },
   output: { schema: AnalyzeSJTScenarioOutputSchema },
-  model: 'googleai/gemini-1.5-flash', // Use flash model for better availability
+  model: process.env.GEMINI_SJT_EVALUATION_MODEL || 'googleai/gemini-2.0-flash-lite', // Use 2.0 Flash-Lite for better availability and performance
   prompt: `
     You are an expert talent assessor specializing in Situational Judgement Tests.
     A candidate was presented with the following scenario and engaged in a complete conversation:
@@ -62,19 +64,20 @@ const prompt = ai.definePrompt({
     Your task is to evaluate this complete conversation across the following competencies: {{#each assessedCompetencies}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}
 
     **Evaluation Criteria**:
-    - The **best response** would align with this rationale: "{{{bestResponseRationale}}}"
-    - The **worst response** would align with this rationale: "{{{worstResponseRationale}}}"
+    - The **best response approach** represents professional excellence: "{{{bestResponseRationale}}}"
+    - The **worst response approach** represents poor professional judgment: "{{{worstResponseRationale}}}"
 
     **Important Instructions**:
     1. Consider the ENTIRE conversation as a cohesive response, not individual answers in isolation
-    2. Evaluate how well the candidate's overall approach demonstrates each competency
-    3. Consider how follow-up responses build upon or clarify initial responses
-    4. Look for consistency, depth, and development of ideas across the conversation
-    5. Score each competency based on the complete conversation context
+    2. Evaluate how well the candidate's overall approach demonstrates each competency in practice
+    3. Focus on competency demonstration and professional judgment rather than specific phrases or solutions
+    4. Consider how follow-up responses build upon or clarify initial responses
+    5. Score each competency based on where the response falls between professional excellence and poor judgment
+    6. Look for understanding of good workplace practices and sound professional reasoning
 
     For each competency, provide:
-    - A score from 0 (aligns with worst response) to 10 (aligns with best response)
-    - A detailed rationale explaining how the complete conversation demonstrates (or fails to demonstrate) this competency
+    - A score from 0 (shows poor professional judgment) to 10 (demonstrates excellent competency)
+    - A detailed rationale explaining how the conversation demonstrates competency understanding and professional approach
 
     Also assess the overall conversation quality and provide a comprehensive assessment of the candidate's performance.
   `,
@@ -89,10 +92,39 @@ const analyzeSJTScenarioFlow = ai.defineFlow(
   async (input) => {
     let lastError;
     
+    // Preprocess conversation history to ensure answers are in English
+    let processedInput = { ...input };
+    
+    try {
+      if (input.conversationHistory && input.conversationHistory.length > 0) {
+        const translatedHistory = await Promise.all(
+          input.conversationHistory.map(async (entry) => {
+            if (entry.answer && entry.answer.trim()) {
+              try {
+                const translation = await translateToEnglish({ text: entry.answer });
+                return {
+                  ...entry,
+                  answer: translation.translatedText
+                };
+              } catch (translationError) {
+                console.warn('Failed to translate scenario conversation entry, using original:', translationError);
+                return entry; // Fallback to original
+              }
+            }
+            return entry;
+          })
+        );
+        processedInput.conversationHistory = translatedHistory;
+      }
+    } catch (preprocessError) {
+      console.warn('Scenario preprocessing failed, using original input:', preprocessError);
+      // Continue with original input if preprocessing fails
+    }
+    
     // Retry logic for overloaded API
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const { output } = await prompt(input);
+        const { output } = await prompt(processedInput);
         if (!output) {
           throw new Error("AI analysis did not return a valid SJT scenario analysis.");
         }

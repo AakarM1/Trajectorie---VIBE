@@ -2,14 +2,16 @@
 'use server';
 /**
  * @fileOverview A Genkit flow to analyze a candidate's response to a Situational Judgement Test (SJT) scenario.
+ * Updated to focus on competency demonstration rather than checklist matching for more accurate assessment.
  *
- * - analyzeSJTResponse - A function that evaluates a candidate's answer against ideal responses.
+ * - analyzeSJTResponse - A function that evaluates a candidate's answer against competency standards.
  * - AnalyzeSJTResponseInput - The input type for the analyzeSJTResponse function.
  * - AnalyzeSJTResponseOutput - The return type for the analyzeSJTResponse function.
  */
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
+import { translateToEnglish, type TranslateToEnglishOutput } from './translate-text';
 
 const AnalyzeSJTResponseInputSchema = z.object({
   situation: z.string().describe('The workplace scenario that was presented to the candidate.'),
@@ -61,7 +63,7 @@ const prompt = ai.definePrompt({
   name: 'analyzeSJTResponsePrompt',
   input: { schema: AnalyzeSJTResponseInputSchema },
   output: { schema: AnalyzeSJTResponseOutputSchema },
-  model: process.env.GEMINI_SJT_EVALUATION_MODEL || 'googleai/gemini-1.5-flash', // Use flash for better availability
+  model: process.env.GEMINI_SJT_EVALUATION_MODEL || 'googleai/gemini-2.0-flash-lite', // Use 2.0 Flash-Lite for better availability and performance
   prompt: `
     You are an expert talent assessor specializing in Situational Judgement Tests.
     A candidate was presented with the following scenario:
@@ -86,23 +88,24 @@ const prompt = ai.definePrompt({
     - **BEST response approach**: {{{bestResponseRationale}}}
     - **WORST response approach**: {{{worstResponseRationale}}}
 
-    **SCORING RUBRIC for {{{assessedCompetency}}} - BE LENIENT AND GENEROUS**:
-    10 - Perfect match: Response ideas/approach perfectly align with best response for {{{assessedCompetency}}}
-    8-9 - Strong match: Got the core idea correct, best response approach clearly demonstrated for {{{assessedCompetency}}} 
-    6-7 - Good match: Shows understanding of {{{assessedCompetency}}}, partially matches best response approach
-    4-5 - Partial match: Some relevant points for {{{assessedCompetency}}}, shows basic understanding
-    2-3 - Limited match: Minimal demonstration of {{{assessedCompetency}}}, closer to worst response
-    1 - Poor match: Response ideas align with worst response for {{{assessedCompetency}}}
+    **SCORING RUBRIC for {{{assessedCompetency}}} - COMPETENCY-BASED EVALUATION**:
+    10 - Excellent: Demonstrates strong {{{assessedCompetency}}} competency with professional approach and sound judgment
+    8-9 - Very Good: Shows good {{{assessedCompetency}}} demonstration with solid reasoning and appropriate response
+    6-7 - Good: Adequate {{{assessedCompetency}}} understanding with reasonable professional approach
+    4-5 - Fair: Basic {{{assessedCompetency}}} awareness with some appropriate elements but gaps in approach
+    2-3 - Poor: Limited {{{assessedCompetency}}} demonstration, more aligned with unprofessional/inappropriate responses
+    1 - Very Poor: Minimal {{{assessedCompetency}}} awareness, clearly inappropriate or harmful response
     0 - No response: No answer provided or completely unrelated to scenario
 
-    **CRITICAL INSTRUCTIONS - BE GENEROUS WITH SCORING**:
-    1. FOCUS ONLY ON: How the response demonstrates {{{assessedCompetency}}}
-    2. IGNORE: Communication style, confidence levels, speech patterns, "umm/uhh", other competencies not being evaluated
-    3. BE LENIENT: If the response shows understanding and effort, score generously (6+ range)
-    4. EVALUATE: Idea alignment with best vs worst response approaches for {{{assessedCompetency}}} specifically  
-    5. SCORE GENEROUSLY: Err on the side of higher scores when response shows competency understanding
+    **CRITICAL INSTRUCTIONS - COMPETENCY-FOCUSED ASSESSMENT**:
+    1. EVALUATE THE SPIRIT: Focus on whether the response demonstrates good {{{assessedCompetency}}} competency, not specific phrases or solutions
+    2. PROFESSIONAL JUDGMENT: Does this response show professional thinking and appropriate workplace behavior?
+    3. BEST vs WORST SPECTRUM: Where does this fall between professional excellence and poor judgment? 
+    4. INTENT RECOGNITION: Does the candidate understand what good {{{assessedCompetency}}} looks like in practice?
+    5. GENEROUS INTERPRETATION: If the response shows competency understanding and professional intent, score 6+ range
+    6. IGNORE: Specific phrases, exact solutions mentioned, communication style, or minor details - focus on competency demonstration
 
-    Score the candidate's response (0-10) and provide a detailed rationale explaining how their approach aligns with the best/worst responses for {{{assessedCompetency}}}.
+    Score the candidate's response (0-10) based on how well it demonstrates {{{assessedCompetency}}} competency. Focus on the professional judgment and competency demonstration rather than specific phrases or exact solutions. Consider whether this response shows someone who understands good {{{assessedCompetency}}} practices in a workplace setting.
   `,
 });
 
@@ -115,10 +118,51 @@ const analyzeSJTResponseFlow = ai.defineFlow(
   async (input) => {
     let lastError;
     
+    // Preprocess candidate responses to ensure they're in English for consistent analysis
+    let processedInput = { ...input };
+    
+    try {
+      // Handle conversation history - translate all answers to English
+      if (input.conversationHistory && input.conversationHistory.length > 0) {
+        const translatedHistory = await Promise.all(
+          input.conversationHistory.map(async (entry) => {
+            if (entry.answer && entry.answer.trim()) {
+              try {
+                const translation = await translateToEnglish({ text: entry.answer });
+                return {
+                  ...entry,
+                  answer: translation.translatedText
+                };
+              } catch (translationError) {
+                console.warn('Failed to translate conversation entry, using original:', translationError);
+                return entry; // Fallback to original
+              }
+            }
+            return entry;
+          })
+        );
+        processedInput.conversationHistory = translatedHistory;
+      }
+      
+      // Handle legacy single candidateAnswer - translate to English
+      if (input.candidateAnswer && input.candidateAnswer.trim()) {
+        try {
+          const translation = await translateToEnglish({ text: input.candidateAnswer });
+          processedInput.candidateAnswer = translation.translatedText;
+        } catch (translationError) {
+          console.warn('Failed to translate candidate answer, using original:', translationError);
+          // Fallback to original answer if translation fails
+        }
+      }
+    } catch (preprocessError) {
+      console.warn('Response preprocessing failed, using original input:', preprocessError);
+      // Continue with original input if preprocessing fails entirely
+    }
+    
     // Enhanced retry logic for overloaded API and rate limits
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const { output } = await prompt(input);
+        const { output } = await prompt(processedInput);
         if (!output) {
           throw new Error("AI analysis did not return a valid SJT analysis.");
         }

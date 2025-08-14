@@ -25,6 +25,8 @@ export interface EnhancedConversationEntry extends ConversationEntry {
 export function groupEntriesByScenario(entries: ConversationEntry[]): Map<string, EnhancedConversationEntry[]> {
   const scenarioGroups = new Map<string, EnhancedConversationEntry[]>();
   
+  console.log(`🔍 Grouping ${entries.length} entries by scenario...`);
+  
   entries.forEach((entry, index) => {
     // Generate a scenario key based on the situation text
     // If no situation is provided, fall back to a question-based key for backward compatibility
@@ -33,19 +35,25 @@ export function groupEntriesByScenario(entries: ConversationEntry[]): Map<string
     if (entry.situation && entry.situation.trim().length > 0) {
       // Use first 50 characters of situation as the key (normalized)
       scenarioKey = entry.situation.trim().substring(0, 50).replace(/[^\w\s]/g, '').trim();
+      console.log(`📝 Entry ${index + 1}: situation="${entry.situation.substring(0, 100)}..." → key="${scenarioKey}"`);
     } else {
       // Fallback: use question-based grouping for backward compatibility
       scenarioKey = `Question_${index + 1}`;
+      console.log(`📝 Entry ${index + 1}: no situation → key="${scenarioKey}"`);
     }
     
     // Ensure we have a valid key
     if (!scenarioKey || scenarioKey.length === 0) {
       scenarioKey = `Scenario_${index + 1}`;
+      console.log(`📝 Entry ${index + 1}: empty key → fallback="${scenarioKey}"`);
     }
     
     // Add entry to the appropriate scenario group
     if (!scenarioGroups.has(scenarioKey)) {
       scenarioGroups.set(scenarioKey, []);
+      console.log(`🆕 Created new scenario group: "${scenarioKey}"`);
+    } else {
+      console.log(`📂 Adding to existing scenario group: "${scenarioKey}"`);
     }
     
     const enhancedEntry: EnhancedConversationEntry = {
@@ -56,6 +64,11 @@ export function groupEntriesByScenario(entries: ConversationEntry[]): Map<string
     };
     
     scenarioGroups.get(scenarioKey)!.push(enhancedEntry);
+  });
+  
+  console.log(`📊 Final grouping: ${scenarioGroups.size} scenarios`);
+  scenarioGroups.forEach((entries, key) => {
+    console.log(`  "${key}": ${entries.length} entries`);
   });
   
   return scenarioGroups;

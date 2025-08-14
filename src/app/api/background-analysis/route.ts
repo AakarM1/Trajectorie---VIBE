@@ -79,11 +79,11 @@ export async function POST(request: NextRequest) {
         console.warn('⚠️ Could not retrieve SJT config, using default penalty of 0%');
       }
       
-      // Group entries by scenario
-      const scenarioGroups = groupEntriesByScenario(submission.history);
-      console.log(`📊 Identified ${scenarioGroups.size} unique scenarios`);
-      
-      const sjtAnalyses: Array<{
+        // Group entries by scenario
+        const scenarioGroups = groupEntriesByScenario(submission.history);
+        console.log(`📊 Identified ${scenarioGroups.size} unique scenarios`);
+        console.log(`📊 Scenario keys: ${Array.from(scenarioGroups.keys()).join(', ')}`);
+        console.log(`📊 Total questions in submission: ${submission.history.length}`);      const sjtAnalyses: Array<{
         competency: string;
         score: number;
         rationale: string;
@@ -527,21 +527,43 @@ OVERALL ASSESSMENT: ${strongResponses.length > improvementAreas.length ?
   'The candidate shows engagement with complex workplace scenarios but would benefit from focused development in key competency areas before advancing. A structured development plan is recommended.' :
   'The candidate shows balanced performance across assessed competencies with equal strengths and development opportunities. Continued growth and targeted skill enhancement will support their professional advancement.'}`;
 
-        // Generate question-wise details for Section 3
-        const questionwiseDetails: QuestionwiseDetail[] = sjtAnalyses.map((analysis, index) => ({
-          questionNumber: index + 1,
-          question: submission.history[index]?.question || 'Question not recorded',
-          candidateAnswer: submission.history[index]?.answer || 'No answer provided',
-          competency: analysis.competency,
-          prePenaltyScore: analysis.prePenaltyScore,
-          postPenaltyScore: analysis.postPenaltyScore,
-          penaltyApplied: analysis.penaltyApplied,
-          hasFollowUp: analysis.hasFollowUp,
-          rationale: analysis.rationale,
-          // TODO: Add follow-up questions and answers from conversation history
-          followUpQuestions: [], // These would come from the enhanced conversation tracking
-          followUpAnswers: []
-        }));
+        // Generate question-wise details for Section 3 - FIXED: Map individual questions correctly
+        console.log(`🔍 Generating Section 3 details for ${submission.history.length} individual questions`);
+        
+        const questionwiseDetails: QuestionwiseDetail[] = submission.history
+          .filter(entry => entry.answer) // Only include answered questions
+          .map((entry, questionIndex) => {
+            // Find which scenario analysis this question belongs to
+            const matchingAnalysis = sjtAnalyses.find(analysis => {
+              // Match by scenario key - find the analysis that covers this question's scenario
+              const entryScenarioKey = entry.situation ? 
+                entry.situation.trim().substring(0, 50).replace(/[^\w\s]/g, '').trim() :
+                `Question_${questionIndex + 1}`;
+              return analysis.scenarioKey === entryScenarioKey;
+            });
+            
+            // Fallback to first analysis if no match found (should not happen with proper grouping)
+            const analysisToUse = matchingAnalysis || sjtAnalyses[0];
+            
+            return {
+              questionNumber: questionIndex + 1,
+              question: entry.question,
+              candidateAnswer: entry.answer!,
+              competency: analysisToUse?.competency || 'General Assessment',
+              prePenaltyScore: analysisToUse?.prePenaltyScore || 5,
+              postPenaltyScore: analysisToUse?.postPenaltyScore || 5,
+              penaltyApplied: analysisToUse?.penaltyApplied || 0,
+              hasFollowUp: analysisToUse?.hasFollowUp || false,
+              rationale: analysisToUse?.rationale || 'Analysis not available for this question.',
+              // TODO: Add follow-up questions and answers from conversation history
+              followUpQuestions: [],
+              followUpAnswers: []
+            };
+          });
+          
+        console.log(`✅ Generated Section 3 with ${questionwiseDetails.length} question entries (from ${sjtAnalyses.length} scenario analyses)`);
+        console.log(`📊 Section 3 Details: Questions ${questionwiseDetails.map(q => q.questionNumber).join(', ')}`);
+        console.log(`📊 Scenario Analyses: ${sjtAnalyses.map(a => a.scenarioKey).join(', ')}`);
 
         // Generate qualitative summaries for each competency (Section 2)
         console.log('🤖 Generating competency-specific qualitative summaries...');
@@ -549,21 +571,46 @@ OVERALL ASSESSMENT: ${strongResponses.length > improvementAreas.length ?
         
         for (const [competencyName, data] of competencyMap.entries()) {
           try {
-            // Get all responses for this competency
-            const competencyResponses = sjtAnalyses
-              .map((analysis, index) => ({
-                questionNumber: index + 1,
-                question: submission.history[index]?.question || 'Question not recorded',
-                candidateAnswer: submission.history[index]?.answer || 'No answer provided',
-                prePenaltyScore: analysis.prePenaltyScore,
-                postPenaltyScore: analysis.postPenaltyScore,
-                penaltyApplied: analysis.penaltyApplied,
-                hasFollowUp: analysis.hasFollowUp,
-                rationale: analysis.rationale,
-                followUpQuestions: [], // TODO: Extract from conversation history
-                followUpAnswers: []
-              }))
-              .filter((_, index) => sjtAnalyses[index].competency === competencyName);
+            // Get all questions for this competency - FIXED: Map individual questions correctly
+            console.log(`🎯 Generating summary for competency: ${competencyName}`);
+            
+            const competencyResponses = submission.history
+              .filter(entry => entry.answer) // Only answered questions
+              .map((entry, questionIndex) => {
+                // Find the analysis for this question's scenario
+                const entryScenarioKey = entry.situation ? 
+                  entry.situation.trim().substring(0, 50).replace(/[^\w\s]/g, '').trim() :
+                  `Question_${questionIndex + 1}`;
+                
+                const matchingAnalysis = sjtAnalyses.find(analysis => 
+                  analysis.scenarioKey === entryScenarioKey && analysis.competency === competencyName
+                );
+                
+                return {
+                  questionNumber: questionIndex + 1,
+                  question: entry.question,
+                  candidateAnswer: entry.answer!,
+                  prePenaltyScore: matchingAnalysis?.prePenaltyScore || 5,
+                  postPenaltyScore: matchingAnalysis?.postPenaltyScore || 5,
+                  penaltyApplied: matchingAnalysis?.penaltyApplied || 0,
+                  hasFollowUp: matchingAnalysis?.hasFollowUp || false,
+                  rationale: matchingAnalysis?.rationale || 'Analysis not available for this question.',
+                  followUpQuestions: [],
+                  followUpAnswers: []
+                };
+              })
+              .filter(response => {
+                // Only include questions that actually assess this competency
+                const entryScenarioKey = submission.history[response.questionNumber - 1]?.situation ? 
+                  submission.history[response.questionNumber - 1].situation!.trim().substring(0, 50).replace(/[^\w\s]/g, '').trim() :
+                  `Question_${response.questionNumber}`;
+                
+                return sjtAnalyses.some(analysis => 
+                  analysis.scenarioKey === entryScenarioKey && analysis.competency === competencyName
+                );
+              });
+
+            console.log(`📊 Found ${competencyResponses.length} questions for competency "${competencyName}"`);
 
             const overallScore = Math.round((data.totalPostPenaltyScore / data.count) * 10) / 10;
             

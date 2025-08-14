@@ -51,7 +51,7 @@ const prompt = ai.definePrompt({
   name: 'generateFinalVerdictPrompt',
   input: { schema: GenerateFinalVerdictInputSchema },
   output: { schema: GenerateFinalVerdictOutputSchema },
-  model: 'googleai/gemini-2.0-flash',
+  model: process.env.GEMINI_DEFAULT_MODEL || 'googleai/gemini-2.0-flash-lite',
   prompt: `
     You are a senior hiring manager responsible for making the final decision on a candidate.
     You have received two separate performance reports for a candidate named {{{candidateName}}} who applied for the role of {{{roleCategory}}}.
