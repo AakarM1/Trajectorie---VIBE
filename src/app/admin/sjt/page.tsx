@@ -1,6 +1,8 @@
 
 'use client';
 
+import { validateCompetency } from '@/lib/competency-validation';
+import { getAllCompetencyNames } from '@/lib/competency-definitions';
 import { useState, useEffect } from 'react';
 import { ProtectedRoute } from '@/contexts/auth-context';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
@@ -251,8 +253,35 @@ const SJTConfigPage = () => {
                                 onChange={(e) => handleScenarioChange(scenario.id, 'assessedCompetency', e.target.value)} 
                                 required 
                             />
+                            {scenario.assessedCompetency && (
+                              <div className="text-sm">
+                                {scenario.assessedCompetency.split(',').map((comp, index) => {
+                                  const validation = validateCompetency(comp.trim());
+                                  return (
+                                    <div key={index} className="mt-1">
+                                      {validation.isValid ? (
+                                        <span className="text-green-600 flex items-center gap-1">
+                                          ✅ "{validation.standardizedName}" - Standardized competency
+                                        </span>
+                                      ) : (
+                                        <div className="text-amber-600">
+                                          ⚠️ "{comp.trim()}" - Not standardized
+                                          {validation.suggestions && validation.suggestions.length > 0 && (
+                                            <div className="ml-4 text-xs">
+                                              Suggestions: {validation.suggestions.join(', ')}
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                             <p className="text-sm text-muted-foreground">
                                 Enter multiple competencies separated by commas. Each competency will be analyzed separately in the report.
+                                <br />
+                                <strong>Available standardized competencies:</strong> {getAllCompetencyNames().slice(0, 5).join(', ')}, and {getAllCompetencyNames().length - 5} more...
                             </p>
                         </div>
                         {scenarios.length > 1 && (

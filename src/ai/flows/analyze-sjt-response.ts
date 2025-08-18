@@ -12,6 +12,7 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { translateToEnglish, type TranslateToEnglishOutput } from './translate-text';
+import { getCompetencyDefinition, type CompetencyDefinition } from '@/lib/competency-definitions';
 
 const AnalyzeSJTResponseInputSchema = z.object({
   situation: z.string().describe('The workplace scenario that was presented to the candidate.'),
@@ -25,6 +26,7 @@ const AnalyzeSJTResponseInputSchema = z.object({
   worstResponseRationale: z.string().describe('A description of the thought process or actions that would constitute the worst possible response.'),
   assessedCompetency: z.string().describe('The primary competency being measured by this scenario (e.g., "Problem Solving").'),
   candidateAnswer: z.string().optional().describe("The candidate's transcribed answer to the question (for backward compatibility)."),
+  competencyDefinition: z.string().optional().describe('The standardized definition of the competency being evaluated.'),
 });
 export type AnalyzeSJTResponseInput = z.infer<typeof AnalyzeSJTResponseInputSchema>;
 
@@ -83,29 +85,30 @@ const prompt = ai.definePrompt({
     {{/if}}
 
     **COMPETENCY BEING EVALUATED**: {{{assessedCompetency}}}
+    **COMPETENCY DEFINITION**: {{{competencyDefinition}}}
 
-    **REFERENCE RESPONSES**:
-    - **BEST response approach**: {{{bestResponseRationale}}}
-    - **WORST response approach**: {{{worstResponseRationale}}}
+    **EVALUATION ANCHORS**:
+    - **BEST response approach** (Score: 10): {{{bestResponseRationale}}}
+    - **WORST response approach** (Score: 0-1): {{{worstResponseRationale}}}
 
-    **SCORING RUBRIC for {{{assessedCompetency}}} - COMPETENCY-BASED EVALUATION**:
-    10 - Excellent: Demonstrates strong {{{assessedCompetency}}} competency with professional approach and sound judgment
-    8-9 - Very Good: Shows good {{{assessedCompetency}}} demonstration with solid reasoning and appropriate response
-    6-7 - Good: Adequate {{{assessedCompetency}}} understanding with reasonable professional approach
-    4-5 - Fair: Basic {{{assessedCompetency}}} awareness with some appropriate elements but gaps in approach
-    2-3 - Poor: Limited {{{assessedCompetency}}} demonstration, more aligned with unprofessional/inappropriate responses
-    1 - Very Poor: Minimal {{{assessedCompetency}}} awareness, clearly inappropriate or harmful response
-    0 - No response: No answer provided or completely unrelated to scenario
+    **STANDARDIZED SCORING CRITERIA**:
+    **10** - Response demonstrates competency at the level of the BEST approach
+    **8-9** - Strong competency demonstration, clearly professional and effective  
+    **6-7** - Good competency understanding with appropriate professional approach
+    **4-5** - Basic competency awareness but with gaps or limited effectiveness
+    **2-3** - Poor competency demonstration, approaching worst response behaviors
+    **0-1** - Response demonstrates competency at the level of the WORST approach or shows no competency understanding
 
-    **CRITICAL INSTRUCTIONS - COMPETENCY-FOCUSED ASSESSMENT**:
-    1. EVALUATE THE SPIRIT: Focus on whether the response demonstrates good {{{assessedCompetency}}} competency, not specific phrases or solutions
-    2. PROFESSIONAL JUDGMENT: Does this response show professional thinking and appropriate workplace behavior?
-    3. BEST vs WORST SPECTRUM: Where does this fall between professional excellence and poor judgment? 
-    4. INTENT RECOGNITION: Does the candidate understand what good {{{assessedCompetency}}} looks like in practice?
-    5. GENEROUS INTERPRETATION: If the response shows competency understanding and professional intent, score 6+ range
-    6. IGNORE: Specific phrases, exact solutions mentioned, communication style, or minor details - focus on competency demonstration
+    **EVALUATION INSTRUCTIONS**:
+    1. **STRICT COMPETENCY FOCUS**: Judge the response ONLY against the competency definition provided above. Do not consider any other criteria.
+    2. **BEST/WORST ANCHORING**: Use the best response as your "10" anchor and worst response as your "0-1" anchor. Score based on where the candidate falls on this spectrum.
+    3. **COMPETENCY DEFINITION ADHERENCE**: The response must demonstrate the specific elements described in the competency definition to score well.
+    4. **RELATIVE POSITIONING**: If the response is similar to the BEST approach, score 8-10. If similar to WORST approach, score 0-3. Everything else falls in between based on competency strength.
+    5. **IGNORE NON-COMPETENCY FACTORS**: Communication style, specific phrases, minor details are irrelevant - focus purely on competency demonstration.
 
-    Score the candidate's response (0-10) based on how well it demonstrates {{{assessedCompetency}}} competency. Focus on the professional judgment and competency demonstration rather than specific phrases or exact solutions. Consider whether this response shows someone who understands good {{{assessedCompetency}}} practices in a workplace setting.
+    **CRITICAL**: Base your score strictly on how well the response demonstrates the competency definition, using the best/worst responses as anchoring points for the 0-10 scale. If a response matches the best approach quality, it should score 10. If it matches the worst approach quality, it should score 0-1.
+
+    Evaluate the candidate's response and provide a score (0-10) with detailed rationale.
   `,
 });
 
@@ -118,8 +121,17 @@ const analyzeSJTResponseFlow = ai.defineFlow(
   async (input) => {
     let lastError;
     
+    // Get standardized competency definition
+    const competencyDefinition = getCompetencyDefinition(input.assessedCompetency);
+    const competencyDefinitionText = competencyDefinition 
+      ? competencyDefinition.description
+      : `Generic competency evaluation for "${input.assessedCompetency}" - no standardized definition available.`;
+    
     // Preprocess candidate responses to ensure they're in English for consistent analysis
-    let processedInput = { ...input };
+    let processedInput = { 
+      ...input,
+      competencyDefinition: competencyDefinitionText
+    };
     
     try {
       // Handle conversation history - translate all answers to English
@@ -166,6 +178,14 @@ const analyzeSJTResponseFlow = ai.defineFlow(
         if (!output) {
           throw new Error("AI analysis did not return a valid SJT analysis.");
         }
+        
+        // Log competency standardization info
+        if (competencyDefinition) {
+          console.log(`✅ Used standardized definition for "${input.assessedCompetency}"`);
+        } else {
+          console.warn(`⚠️ No standardized definition found for "${input.assessedCompetency}" - using generic evaluation`);
+        }
+        
         return output;
       } catch (error: any) {
         lastError = error;

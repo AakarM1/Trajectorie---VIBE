@@ -1,5 +1,6 @@
 {
   "buildCommand": "npm run build",
+  "installCommand": "npm ci",
   "outputDirectory": ".next",
   "framework": "nextjs",
   "functions": {
@@ -11,7 +12,8 @@
     }
   },
   "env": {
-    "NEXT_PUBLIC_FIREBASE_PROJECT_ID": "trajectorie-vibe-8366c"
+    "NEXT_PUBLIC_FIREBASE_PROJECT_ID": "trajectorie-vibe-8366c",
+    "NPM_CONFIG_LEGACY_PEER_DEPS": "true"
   },
   "build": {
     "env": {
