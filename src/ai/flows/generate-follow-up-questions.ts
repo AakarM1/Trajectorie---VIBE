@@ -18,6 +18,7 @@ const GenerateInterviewQuestionsInputSchema = z.object({
   jobDescription: z.string().optional().describe('The full job description for the role.'),
   numberOfQuestions: z.number().describe('The total number of questions to generate for the interview.'),
   isFollowUp: z.boolean().optional().describe('Whether these are follow-up questions or the start of an interview.'),
+  followUpCount: z.number().optional().describe('EXACT number of follow-up questions to generate (enforced server-side).'),
   // Multilingual support
   targetLanguage: z.string().optional().describe('Target language code for generating questions (e.g., "es", "fr"). Defaults to "en".'),
 });
@@ -46,7 +47,10 @@ The questions should be based on the provided job description to assess the cand
 "{{{jobDescription}}}"
 
 {{#if isFollowUp}}
-Generate {{numberOfQuestions}} follow-up questions that dig deeper into the skills and responsibilities mentioned. Do not include introductory questions like "tell me about yourself".
+Generate EXACTLY {{numberOfQuestions}} follow-up questions that dig deeper into the skills and responsibilities mentioned. Do not include introductory questions like "tell me about yourself".
+{{#if followUpCount}}
+CRITICAL: You must generate EXACTLY {{followUpCount}} questions, no more, no less. If you cannot generate {{followUpCount}} quality questions, generate fewer rather than padding with low-quality questions.
+{{/if}}
 {{else}}
 The first question should always be a friendly introduction. For example: "Hello {{#if name}}{{{name}}}{{else}}candidate{{/if}}, thank you for your interest in the {{{roleCategory}}} role. To start, please introduce yourself and tell me a bit about why you're applying for this position."
 The subsequent questions should be varied and cover different aspects to holistically assess the candidate's suitability, such as behavioral examples, situational judgment, technical depth, and problem-solving skills relevant to the role and job description.
@@ -66,16 +70,28 @@ const generateInterviewQuestionsFlow = ai.defineFlow(
     try {
       console.log('🚀 Generating interview questions with input:', input);
       
+      // Enforce followUpCount if specified for SJT follow-ups
+      const configuredCount = input.followUpCount ?? input.numberOfQuestions;
+      console.log(`🎯 Configured to generate exactly ${configuredCount} questions`);
+      
       const {output} = await prompt(input);
       console.log('✅ AI response received:', output);
       
       if (output && output.questions && output.questions.length > 0) {
-        console.log(`✅ Successfully generated ${output.questions.length} questions`);
+        // CRITICAL: Enforce the configured count on server side
+        let finalQuestions = output.questions;
+        
+        if (input.followUpCount && finalQuestions.length > input.followUpCount) {
+          console.log(`⚡ AI generated ${finalQuestions.length} questions, enforcing limit of ${input.followUpCount}`);
+          finalQuestions = finalQuestions.slice(0, input.followUpCount);
+        }
+        
+        console.log(`✅ Successfully generated ${finalQuestions.length} questions (requested: ${configuredCount})`);
         
         // Add multilingual support if target language is specified and not English
         if (input.targetLanguage && input.targetLanguage !== 'en') {
           try {
-            const translationRequests = output.questions.map(question => ({
+            const translationRequests = finalQuestions.map(question => ({
               text: question,
               targetLang: input.targetLanguage!,
               sourceLang: 'en'
@@ -87,17 +103,17 @@ const generateInterviewQuestionsFlow = ai.defineFlow(
               .map(result => result.translated);
             
             return {
-              questions: output.questions, // Keep original English questions
+              questions: finalQuestions, // Keep original English questions
               questionsTranslated: translatedQuestions, // Add translated versions
               languageCode: input.targetLanguage
             };
           } catch (translationError) {
             console.warn('⚠️ Translation failed, returning English questions only:', translationError);
-            return output;
+            return { questions: finalQuestions };
           }
         }
         
-        return output;
+        return { questions: finalQuestions };
       } else {
         console.warn('⚠️ AI returned empty or invalid questions, using fallbacks');
       }
@@ -140,6 +156,8 @@ const generateInterviewQuestionsFlow = ai.defineFlow(
       ];
     }
     
-    return { questions: fallbackQuestions.slice(0, input.numberOfQuestions) };
+    // Apply followUpCount limit to fallback questions as well
+    const requestedCount = input.followUpCount ?? input.numberOfQuestions;
+    return { questions: fallbackQuestions.slice(0, requestedCount) };
   }
 );

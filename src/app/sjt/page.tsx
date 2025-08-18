@@ -15,7 +15,7 @@ import { SJTInstructions } from '@/components/sjt/sjt-instructions';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { configurationService } from '@/lib/config-service';
+import { configurationService, getSjtFollowUpCount, type SJTConfig } from '@/lib/config-service';
 // 🔒 MINIMAL IMPACT IMPORTS - Progressive upload support for SJT
 import { ProgressiveProvider, useProgressive } from '@/contexts/progressive-context';
 // Note: SessionRecoveryModal is imported but will be used in a separate PR
@@ -79,7 +79,7 @@ function SJTInterviewPage() {
   const [canTakeTest, setCanTakeTest] = useState(true);
   const [checkingAttempts, setCheckingAttempts] = useState(true);
   const [followUpMap, setFollowUpMap] = useState<{[key: number]: number}>({}); // Track follow-up count per question
-  const [maxFollowUps, setMaxFollowUps] = useState(2); // Default max follow-ups per scenario
+  const [maxFollowUps, setMaxFollowUps] = useState(1); // Use configured follow-up count (default 1)
   
   const MAX_ATTEMPTS = 1;
 
@@ -153,13 +153,14 @@ function SJTInterviewPage() {
           }
           
           // Check if AI follow-up questions are enabled
-          const numAiQuestions = settings?.aiGeneratedQuestions || 0;
-          if (numAiQuestions > 0) {
-            console.log(`🤖 Setting max follow-up questions per scenario to ${numAiQuestions}`);
+          const configuredFollowUpCount = getSjtFollowUpCount(settings);
+          console.log(`🎯 Admin configured follow-up count: ${configuredFollowUpCount}`);
+          
+          if (configuredFollowUpCount > 0) {
+            console.log(`🤖 Setting max follow-up questions per scenario to ${configuredFollowUpCount}`);
             
-            // Instead of generating all follow-up questions upfront,
-            // we'll just set the maximum number of follow-ups allowed per scenario
-            setMaxFollowUps(numAiQuestions);
+            // Set the maximum number of follow-ups based on admin configuration
+            setMaxFollowUps(configuredFollowUpCount);
             
             // Initialize the follow-up map to track follow-ups per question
             const initialFollowUpMap: {[key: number]: number} = {};
@@ -170,10 +171,11 @@ function SJTInterviewPage() {
             
             toast({ 
               title: `Adaptive Follow-up Questions Enabled`,
-              description: `Up to ${numAiQuestions} follow-up questions will be generated based on your answers.`
+              description: `Up to ${configuredFollowUpCount} follow-up question${configuredFollowUpCount === 1 ? '' : 's'} will be generated based on your answers.`
             });
           } else {
             // No AI follow-up questions enabled
+            console.log('🚫 Follow-up questions disabled in admin configuration');
             setMaxFollowUps(0);
           }
         }

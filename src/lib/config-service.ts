@@ -1,5 +1,55 @@
 import { configService } from '@/lib/database';
 
+// Typed interfaces for SJT configuration
+export interface SJTSettings {
+  timeLimit: number; // in minutes, 0 for no limit
+  numberOfQuestions: number;
+  questionTimeLimit: number; // per-question time limit in seconds
+  aiGeneratedQuestions: number; // DEPRECATED: Use followUpCount instead
+  followUpCount: number; // Number of AI-generated follow-up questions (replaces aiGeneratedQuestions)
+  followUpPenalty: number; // Percentage penalty for follow-up questions (0-100)
+}
+
+export interface SJTScenario {
+  id: number;
+  situation: string;
+  question: string;
+  bestResponseRationale: string;
+  worstResponseRationale: string;
+  assessedCompetency: string;
+}
+
+export interface SJTConfig {
+  scenarios: SJTScenario[];
+  settings: SJTSettings;
+}
+
+/**
+ * Get SJT configuration with typed return and safe defaults
+ */
+export function getSjtConfig(): Promise<SJTConfig | null> {
+  return configurationService.getSJTConfig();
+}
+
+/**
+ * Extract follow-up count from SJT settings with fallback handling
+ */
+export function getSjtFollowUpCount(settings?: SJTSettings): number {
+  if (!settings) return 1; // Default fallback
+  
+  // Use new followUpCount if available, otherwise fall back to deprecated aiGeneratedQuestions
+  const followUpCount = settings.followUpCount ?? settings.aiGeneratedQuestions ?? 1;
+  
+  // Validate and normalize the count
+  if (typeof followUpCount !== 'number' || followUpCount < 0) {
+    console.warn('Invalid followUpCount, using default of 1');
+    return 1;
+  }
+  
+  // Cap at reasonable maximum
+  return Math.min(followUpCount, 5);
+}
+
 export const configurationService = {
   // Save JDT configuration
   async saveJDTConfig(config: any): Promise<boolean> {

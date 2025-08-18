@@ -151,7 +151,7 @@ const evaluateAnswerQualityFlow = ai.defineFlow(
         const shouldBeComplete = output.score >= 4 || input.followUpCount >= input.maxFollowUps;
         
         if (shouldBeIncomplete && output.isComplete) {
-          console.log('⚠️ AI incorrectly marked as complete, fixing...');
+          console.log(`⚠️ AI incorrectly marked as complete (score=${output.score}, followUps=${input.followUpCount}/${input.maxFollowUps}), fixing...`);
           output.isComplete = false;
           // If AI didn't generate a follow-up question when it should have, we need one
           if (!output.followUpQuestion) {
@@ -159,9 +159,16 @@ const evaluateAnswerQualityFlow = ai.defineFlow(
             output.followUpQuestion = `${input.questionNumber}.${followUpLetter}) Could you provide more specific details about how you would handle this situation, considering the best practices for this scenario?`;
           }
         } else if (shouldBeComplete && !output.isComplete) {
-          console.log('⚠️ AI incorrectly marked as incomplete, fixing...');
+          console.log(`⚠️ AI incorrectly marked as incomplete (score=${output.score}, followUps=${input.followUpCount}/${input.maxFollowUps}), fixing...`);
           output.isComplete = true;
-          output.followUpQuestion = undefined; // Remove follow-up if max reached
+          output.followUpQuestion = undefined; // Remove follow-up if max reached or score sufficient
+        }
+        
+        // Critical safeguard: Never generate follow-up if we've reached the limit
+        if (input.followUpCount >= input.maxFollowUps) {
+          console.log(`🛡️ Follow-up limit enforcement: ${input.followUpCount}/${input.maxFollowUps} - forcing completion`);
+          output.isComplete = true;
+          output.followUpQuestion = undefined;
         }
         
         // If there's a follow-up question, ensure it has the correct letter format
