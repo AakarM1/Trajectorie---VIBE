@@ -21,7 +21,7 @@ GEMINI_SJT_EVALUATION_MODEL=googleai/gemini-2.0-flash-lite
 
 ### Configuration File (src/ai/config.ts)
 - Updated default fallback values from `gemini-1.5-pro` to `gemini-2.0-flash-lite`
-- Added comments explaining the performance benefits
+- Added comments explaining the performance benefits.
 
 ### AI Flow Files Updated
 1. **src/ai/flows/analyze-sjt-scenario.ts**
