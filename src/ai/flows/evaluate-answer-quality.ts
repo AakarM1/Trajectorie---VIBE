@@ -65,23 +65,32 @@ CONTEXT:
 CANDIDATE'S ANSWER:
 "{{candidateAnswer}}"
 
-EVALUATION INSTRUCTIONS:
+EVALUATION INSTRUCTIONS - BE GENEROUS:
 1. **Compare the candidate's answer directly to the BEST RESPONSE CRITERIA above**
-2. **Identify specific elements from the best response that are missing or underdeveloped in the candidate's answer**
-3. **Focus on gaps**: What key aspects mentioned in the best response criteria did the candidate NOT address?
-4. **Generate ONE targeted follow-up question** that:
-   - Guides the candidate toward the MOST IMPORTANT missing element from the best response
-   - Helps bridge the gap between their current answer and the ideal response
-   - Encourages them to consider specific aspects they haven't thought about yet
+2. **Focus on MAJOR gaps only**: What ESSENTIAL elements from the best response are completely missing?
+3. **Be generous with substance**: If candidate covers the key actions/approach, even with different wording, consider it covered
+4. **Generate follow-up ONLY for SIGNIFICANT missing elements** that:
+   - Are essential parts of the best response that candidate completely missed
+   - Would substantially improve their competency demonstration
+   - Are not already addressed in their answer (even if worded differently)
    - Use this exact format: "{{questionNumber}}.a)" for first follow-up, "{{questionNumber}}.b)" for second, etc.
    - ONLY generate ONE question, not multiple questions in a single response
 
-SCORING CRITERIA (SCALE 1-5):
-- **5**: Answer perfectly aligns with best response criteria, covers ALL major elements
-- **4**: Answer covers most elements from best response, minor gaps only
-- **3**: Answer covers some elements but misses several important aspects from best response  
-- **2**: Answer covers few elements from the best response criteria
-- **1**: Answer covers very few or no elements from the best response criteria
+**EXAMPLES OF WHEN NOT TO GENERATE FOLLOW-UPS (BE EXTREMELY GENEROUS)**:
+- Best Response: "Call team meeting, explain targets, discuss strategies"
+- Candidate: "I'll call team meeting, explain targets and incentives, discuss overcoming obstacles, make plans and strategies" → **Score 5, isComplete = TRUE** (covers all elements + extra value)
+- Candidate: "I'll meet with team, explain new targets, work together to achieve them" → **Score 4-5, isComplete = TRUE** (covers core approach) 
+- Candidate: "I'll talk to my team about the targets and discuss solutions" → **Score 4, isComplete = TRUE** (covers main elements)
+- Candidate: "I'll meet with team to discuss targets" → **Score 3, isComplete = TRUE** (covers basic approach)
+- Candidate: "I'll send email about targets" → **Score 2, isComplete = TRUE** (some coverage but poor approach)
+- Candidate: "I don't know what to do" → **Score 1, could need follow-up** (no coverage of best response)
+
+SCORING CRITERIA (SCALE 1-5) - BE EXTREMELY GENEROUS:
+- **5**: Answer covers ALL or MOST major elements from best response - be very generous, include responses with extra details
+- **4**: Answer covers MOST elements from best response, reward comprehensive thinking even if different approach  
+- **3**: Answer covers MAIN elements adequately - be lenient, focus on core coverage
+- **2**: Answer covers SOME elements but clearly missing key aspects from best response  
+- **1**: Answer covers VERY FEW or NO elements from the best response criteria
 
 COMPLETION RULES (CRITICAL - FOLLOW EXACTLY):
 - **Mark isComplete = false** if:
@@ -91,17 +100,27 @@ COMPLETION RULES (CRITICAL - FOLLOW EXACTLY):
   - Score is 4 or 5 (covers most/all best response elements), OR
   - Maximum follow-ups have been reached (followUpCount >= maxFollowUps)
 
+EXTREMELY GENEROUS EVALUATION PRINCIPLE:
+- If candidate covers the MAIN POINTS from best response, automatically score 4-5 regardless of extra content
+- Extra details, additional strategies, comprehensive thinking should INCREASE scores
+- Only generate follow-ups for responses that completely miss the core approach (score 1)
+- Focus on SUBSTANCE and COMPETENCY DEMONSTRATION, not perfect phrase matching
+
 EXAMPLES:
 - Score = 1, followUpCount = 0, maxFollowUps = 2 → isComplete = FALSE (generate follow-up)
-- Score = 1, followUpCount = 1, maxFollowUps = 2 → isComplete = FALSE (generate follow-up)
+- Score = 2, followUpCount = 0, maxFollowUps = 2 → isComplete = FALSE (generate follow-up)
+- Score = 3, followUpCount = 0, maxFollowUps = 2 → isComplete = FALSE (generate follow-up)
 - Score = 1, followUpCount = 2, maxFollowUps = 2 → isComplete = TRUE (max reached)
 - Score = 4, followUpCount = 0, maxFollowUps = 2 → isComplete = TRUE (good enough)
+- Score = 5, followUpCount = 0, maxFollowUps = 2 → isComplete = TRUE (excellent response)
 
 FOLLOW-UP STRATEGY:
 - If score is 1, 2, or 3 and follow-ups available: Generate ONE question targeting the most important missing element from the best response
 - If score is 4+ or maximum follow-ups reached: Mark as complete
 
-The follow-up question should specifically help the candidate discover and incorporate the missing best-response elements they haven't considered yet.`,
+**CRITICAL**: Generate follow-ups for scores 1, 2, or 3 to help improve responses. Only scores 4 and 5 are considered complete and adequate.
+
+The follow-up question should be generated for responses scoring 1, 2, or 3 that need improvement to reach the best response level.`,
 });
 
 const evaluateAnswerQualityFlow = ai.defineFlow(
@@ -146,9 +165,9 @@ const evaluateAnswerQualityFlow = ai.defineFlow(
           rationale: output.rationale.substring(0, 200) + '...'
         });
         
-        // SAFEGUARD: Enforce completion logic in case AI makes a mistake
-        const shouldBeIncomplete = output.score < 4 && input.followUpCount < input.maxFollowUps;
-        const shouldBeComplete = output.score >= 4 || input.followUpCount >= input.maxFollowUps;
+        // SAFEGUARD: Enforce completion logic to match prompt rules
+        const shouldBeIncomplete = output.score <= 3 && input.followUpCount < input.maxFollowUps; // Scores 1-3 need follow-up
+        const shouldBeComplete = output.score >= 4 || input.followUpCount >= input.maxFollowUps; // Scores 4+ are adequate
         
         if (shouldBeIncomplete && output.isComplete) {
           console.log(`⚠️ AI incorrectly marked as complete (score=${output.score}, followUps=${input.followUpCount}/${input.maxFollowUps}), fixing...`);
