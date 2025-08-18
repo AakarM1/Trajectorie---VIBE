@@ -21,6 +21,9 @@ interface User {
   clientName: string;
   role: string;
   password?: string; // only for creation, not stored in state
+  // Multilingual support
+  preferredLanguage?: string; // ISO 639-1 code
+  languageCode?: string; // Same as preferredLanguage for consistency
 }
 
 // Define the auth context type

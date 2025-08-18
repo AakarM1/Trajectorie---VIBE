@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { ProtectedRoute, useAuth } from '@/contexts/auth-context';
+import { useLanguage } from '@/contexts/language-context';
 import type { ConversationEntry, AnalysisResult, PreInterviewDetails, InterviewMode, Submission } from '@/types';
 import type { AnalyzeConversationInput } from '@/ai/flows/analyze-conversation';
 import type { GenerateInterviewQuestionsInput } from '@/ai/flows/generate-follow-up-questions';
@@ -16,6 +17,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { configurationService } from '@/lib/config-service';
+import { useTranslation } from 'react-i18next';
 // 🔒 MINIMAL IMPACT IMPORTS - New progressive functionality
 import { ProgressiveProvider, useProgressive } from '@/contexts/progressive-context';
 import { SessionRecoveryModal } from '@/components/session-recovery-modal';
@@ -27,8 +29,10 @@ const GLOBAL_SETTINGS_KEY = 'global-settings';
 
 function VerbalInterviewPage() {
   const { user, saveSubmission, canUserTakeTest, getSubmissions } = useAuth();
+  const { currentLanguage, translate, isMultilingualEnabled } = useLanguage();
   const { toast } = useToast();
   const router = useRouter();
+  const { t } = useTranslation();
   
   // 🔒 MINIMAL IMPACT PROGRESSIVE HOOKS - Only used if feature enabled
   const progressive = useProgressive();

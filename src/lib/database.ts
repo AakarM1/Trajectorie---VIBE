@@ -36,6 +36,9 @@ export interface FirestoreUser {
   passwordHash?: string; // In real app, store hashed passwords
   createdAt: Timestamp | null;
   updatedAt: Timestamp | null;
+  // Multilingual support
+  preferredLanguage?: string; // ISO 639-1 code (e.g., 'en', 'es', 'ar')
+  languageCode?: string; // Same as preferredLanguage for consistency
 }
 
 // Configuration interface for Firestore

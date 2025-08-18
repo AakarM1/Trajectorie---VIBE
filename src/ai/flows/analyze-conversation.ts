@@ -12,12 +12,18 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 import { translateToEnglish } from './translate-text';
+import { translationService } from '@/lib/translation-service';
 
 const QuestionAnswerSchema = z.object({
   question: z.string(),
   answer: z.string(),
   preferredAnswer: z.string().optional().describe("Guidance on what constitutes a good answer for this specific question."),
   competency: z.string().optional().describe("The competency this question is designed to assess."),
+  // Multilingual fields
+  languageCode: z.string().optional().describe("Language code of the original answer"),
+  answerNative: z.string().optional().describe("Original answer in native language"),
+  answerEn: z.string().optional().describe("Answer translated to English"),
+  questionTranslated: z.string().optional().describe("Question translated to user's language"),
 });
 
 const AnalyzeConversationInputSchema = z.object({
@@ -148,10 +154,16 @@ const analyzeConversationFlow = ai.defineFlow(
           input.conversationHistory.map(async (qa) => {
             if (qa.answer && qa.answer.trim()) {
               try {
-                const translation = await translateToEnglish({ text: qa.answer });
+                // Use new translation service for better handling
+                const translatedAnswer = qa.languageCode && qa.languageCode !== 'en' 
+                  ? await translationService.translate(qa.answer, 'en', qa.languageCode)
+                  : qa.answer;
+                
                 return {
                   ...qa,
-                  answer: translation.translatedText
+                  answer: translatedAnswer,
+                  answerEn: translatedAnswer,
+                  answerNative: qa.answerNative || qa.answer
                 };
               } catch (translationError) {
                 console.warn('Failed to translate conversation answer, using original:', translationError);

@@ -58,15 +58,70 @@ const AdminDashboard = () => {
 
     const handleSaveSettings = async () => {
         try {
+            // Save global settings first
             const success = await configurationService.saveGlobalSettings(settings);
-            if (success) {
-                toast({
-                    title: 'Settings Saved',
-                    description: 'Global settings have been updated in the database.',
-                });
-            } else {
+            if (!success) {
                 throw new Error('Failed to save settings');
             }
+            
+            // Initialize translation catalogs for any new languages
+            const initPromises = settings.languages.map(async (languageName) => {
+                if (languageName === 'English') return; // Skip English
+                
+                try {
+                    // Detect language code from name (basic mapping)
+                    const detectLanguageCode = (name: string): string => {
+                        const lowerName = name.toLowerCase();
+                        const nameToCode: Record<string, string> = {
+                            'spanish': 'es', 'español': 'es',
+                            'french': 'fr', 'français': 'fr',
+                            'german': 'de', 'deutsch': 'de',
+                            'arabic': 'ar', 'العربية': 'ar',
+                            'chinese': 'zh', '中文': 'zh',
+                            'japanese': 'ja', '日本語': 'ja',
+                            'korean': 'ko', '한국어': 'ko',
+                            'portuguese': 'pt', 'português': 'pt',
+                            'russian': 'ru', 'русский': 'ru',
+                            'italian': 'it', 'italiano': 'it',
+                            'dutch': 'nl', 'nederlands': 'nl',
+                            'hindi': 'hi', 'हिन्दी': 'hi',
+                            'urdu': 'ur', 'اردو': 'ur'
+                        };
+                        return nameToCode[lowerName] || 'auto';
+                    };
+                    
+                    const languageCode = detectLanguageCode(languageName);
+                    
+                    // Call catalog initialization API
+                    const response = await fetch('/api/i18n/init', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            language: languageName,
+                            languageCode: languageCode
+                        }),
+                    });
+                    
+                    if (response.ok) {
+                        const result = await response.json();
+                        console.log(`✅ Initialized catalog for ${languageName}:`, result);
+                    } else {
+                        console.warn(`⚠️ Failed to initialize catalog for ${languageName}`);
+                    }
+                } catch (error) {
+                    console.warn(`⚠️ Error initializing catalog for ${languageName}:`, error);
+                }
+            });
+            
+            // Wait for all catalog initializations (but don't fail if some fail)
+            await Promise.allSettled(initPromises);
+            
+            toast({
+                title: 'Settings Saved',
+                description: 'Global settings have been updated and translation catalogs initialized.',
+            });
         } catch (error) {
             console.error('Error saving global settings:', error);
             toast({

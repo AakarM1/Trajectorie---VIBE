@@ -10,6 +10,7 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
+import { translationService } from '@/lib/translation-service';
 
 const GenerateInterviewQuestionsInputSchema = z.object({
   name: z.string().optional().describe('The name of the candidate.'),
@@ -17,11 +18,15 @@ const GenerateInterviewQuestionsInputSchema = z.object({
   jobDescription: z.string().optional().describe('The full job description for the role.'),
   numberOfQuestions: z.number().describe('The total number of questions to generate for the interview.'),
   isFollowUp: z.boolean().optional().describe('Whether these are follow-up questions or the start of an interview.'),
+  // Multilingual support
+  targetLanguage: z.string().optional().describe('Target language code for generating questions (e.g., "es", "fr"). Defaults to "en".'),
 });
 export type GenerateInterviewQuestionsInput = z.infer<typeof GenerateInterviewQuestionsInputSchema>;
 
 const GenerateInterviewQuestionsOutputSchema = z.object({
   questions: z.array(z.string()).describe('An array of interview questions.'),
+  questionsTranslated: z.array(z.string()).optional().describe('An array of translated interview questions in target language.'),
+  languageCode: z.string().optional().describe('Language code of the generated questions.'),
 });
 export type GenerateInterviewQuestionsOutput = z.infer<typeof GenerateInterviewQuestionsOutputSchema>;
 
@@ -66,6 +71,32 @@ const generateInterviewQuestionsFlow = ai.defineFlow(
       
       if (output && output.questions && output.questions.length > 0) {
         console.log(`✅ Successfully generated ${output.questions.length} questions`);
+        
+        // Add multilingual support if target language is specified and not English
+        if (input.targetLanguage && input.targetLanguage !== 'en') {
+          try {
+            const translationRequests = output.questions.map(question => ({
+              text: question,
+              targetLang: input.targetLanguage!,
+              sourceLang: 'en'
+            }));
+            
+            const translationResults = await translationService.translateBatch(translationRequests);
+            const translatedQuestions = translationResults
+              .filter(result => result.success)
+              .map(result => result.translated);
+            
+            return {
+              questions: output.questions, // Keep original English questions
+              questionsTranslated: translatedQuestions, // Add translated versions
+              languageCode: input.targetLanguage
+            };
+          } catch (translationError) {
+            console.warn('⚠️ Translation failed, returning English questions only:', translationError);
+            return output;
+          }
+        }
+        
         return output;
       } else {
         console.warn('⚠️ AI returned empty or invalid questions, using fallbacks');
