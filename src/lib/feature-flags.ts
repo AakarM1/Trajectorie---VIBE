@@ -8,13 +8,15 @@ export interface FeatureFlags {
   progressiveSave: boolean;
   enhancedProgress: boolean;
   adminLiveTracking: boolean;
+  i18nEnabled: boolean;        // New: Multilingual support
 }
 
 // Default feature flags (all disabled for safety)
 const DEFAULT_FLAGS: FeatureFlags = {
   progressiveSave: false,      // Progressive per-question saving
   enhancedProgress: false,     // Enhanced progress indicators
-  adminLiveTracking: false     // Live admin tracking
+  adminLiveTracking: false,    // Live admin tracking
+  i18nEnabled: false,          // Multilingual support
 };
 
 /**
@@ -36,7 +38,8 @@ export class FeatureFlagService {
     const envFlags: Partial<FeatureFlags> = {
       progressiveSave: process.env.NEXT_PUBLIC_FEATURE_PROGRESSIVE_SAVE === 'true',
       enhancedProgress: process.env.NEXT_PUBLIC_FEATURE_ENHANCED_PROGRESS === 'true',
-      adminLiveTracking: process.env.NEXT_PUBLIC_FEATURE_ADMIN_LIVE_TRACKING === 'true'
+      adminLiveTracking: process.env.NEXT_PUBLIC_FEATURE_ADMIN_LIVE_TRACKING === 'true',
+      i18nEnabled: process.env.NEXT_PUBLIC_FEATURE_I18N_ENABLED === 'true',
     };
     
     // Merge with defaults
@@ -65,6 +68,13 @@ export class FeatureFlagService {
    */
   isAdminLiveTrackingEnabled(): boolean {
     return this.flags.adminLiveTracking;
+  }
+  
+  /**
+   * Check if internationalization is enabled
+   */
+  isI18nEnabled(): boolean {
+    return this.flags.i18nEnabled;
   }
   
   /**

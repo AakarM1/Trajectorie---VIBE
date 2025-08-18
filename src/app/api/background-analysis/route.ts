@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { submissionService, convertFirestoreSubmission } from '@/lib/database';
 import { analyzeConversation } from '@/ai/flows/analyze-conversation';
-import { analyzeSJTResponse, type AnalyzeSJTResponseInput } from '@/ai/flows/analyze-sjt-response';
+import { analyzeSJTResponse, analyzeSingleCompetency, type AnalyzeSJTResponseInput } from '@/ai/flows/analyze-sjt-response';
+import { analyzeSJTScenario, type AnalyzeSJTScenarioInput } from '@/ai/flows/analyze-sjt-scenario';
 import { generateCompetencySummaries } from '@/ai/flows/generate-competency-summaries';
 import { configurationService } from '@/lib/config-service';
+import { groupEntriesByScenario, calculatePenaltyScore, isFollowUpQuestion } from '@/lib/scenario-grouping-utils';
 import type { AnalysisResult, QuestionwiseDetail, Competency } from '@/types';
 
 export async function POST(request: NextRequest) {
@@ -54,7 +56,7 @@ export async function POST(request: NextRequest) {
       
       analysisResult = await analyzeConversation(builtAnalysisInput);
     } else if (type === 'sjt') {
-      // New approach: SJT analysis
+      // New approach: SJT analysis with proper scenario grouping
       const fsSubmission = await submissionService.getById(submissionId);
       if (!fsSubmission) {
         return NextResponse.json(
@@ -65,90 +67,258 @@ export async function POST(request: NextRequest) {
       
       const submission = convertFirestoreSubmission(fsSubmission);
       
-      // Get SJT configuration for penalty settings
-      const sjtConfig = await configurationService.getSJTConfig();
-      const followUpPenalty = sjtConfig?.settings?.followUpPenalty || 0;
+      console.log(`🤖 Analyzing SJT submission with ${submission.history.length} entries...`);
       
-      console.log(`🤖 Analyzing ${submission.history.length} SJT scenarios with ${followUpPenalty}% follow-up penalty...`);
-      const sjtAnalyses: Array<any> = [];
+      // Get SJT configuration to retrieve follow-up penalty
+      let followUpPenalty = 0;
+      try {
+        const sjtConfig = await configurationService.getSJTConfig();
+        followUpPenalty = sjtConfig?.followUpPenalty || 0;
+        console.log(`📊 Using follow-up penalty: ${followUpPenalty}%`);
+      } catch (error) {
+        console.warn('⚠️ Could not retrieve SJT config, using default penalty of 0%');
+      }
       
-      // Process each scenario using admin-defined criteria from the submission
-      for (let i = 0; i < submission.history.length; i++) {
-        const entry = submission.history[i];
+        // Group entries by scenario
+        const scenarioGroups = groupEntriesByScenario(submission.history);
+        console.log(`📊 Identified ${scenarioGroups.size} unique scenarios`);
+        console.log(`📊 Scenario keys: ${Array.from(scenarioGroups.keys()).join(', ')}`);
+        console.log(`📊 Total questions in submission: ${submission.history.length}`);      const sjtAnalyses: Array<{
+        competency: string;
+        score: number;
+        rationale: string;
+        scenarioKey: string;
+        questionCount: number;
+        hasFollowUps: boolean;
+        conversationQuality?: string;
+        overallAssessment?: string;
+        isFallback?: boolean;
+        prePenaltyScore: number;
+        postPenaltyScore: number;
+        penaltyApplied: number;
+        hasFollowUp: boolean;
+        questionNumber?: number;
+        isEmergencyFallback?: boolean;
+      }> = [];
+      
+      // Process each scenario as a complete conversation with rate limiting
+      let scenarioIndex = 0;
+      for (const [scenarioKey, entries] of scenarioGroups) {
+        console.log(`🔍 Analyzing scenario ${scenarioIndex + 1}/${scenarioGroups.size}: "${scenarioKey}" with ${entries.length} questions/answers`);
         
-        // Skip entries without answers
-        if (!entry?.answer) {
-          console.log(`⚠️ Skipping scenario ${i + 1} - no answer provided`);
+        // Add minimal delay between scenarios only to prevent overwhelming
+        if (scenarioIndex > 0) {
+          console.log(`⏳ Brief pause between scenarios...`);
+          await new Promise(resolve => setTimeout(resolve, 100)); // Minimal 100ms delay
+        }
+        
+        // Skip scenarios without any answers
+        const answeredEntries = entries.filter(e => e.answer);
+        if (answeredEntries.length === 0) {
+          console.log(`⚠️ Skipping scenario "${scenarioKey}" - no answers provided`);
           continue;
         }
         
-        // Extract assessedCompetency from the entry - prefer specific admin-defined competency field
-        const assessedCompetencyRaw = entry.assessedCompetency || entry.competency || `Situational Judgment ${i+1}`;
+        // Get scenario metadata from the first entry
+        const firstEntry = entries[0];
+        const situation = firstEntry.situation || "No situation provided";
+        const bestResponseRationale = firstEntry.bestResponseRationale || "No best response criteria provided";
+        const worstResponseRationale = firstEntry.worstResponseRationale || "No worst response criteria provided";
         
-        // Parse multiple competencies separated by commas
+        // Parse competencies (can be multiple separated by commas)
+        const assessedCompetencyRaw = firstEntry.assessedCompetency || 'General Assessment';
         const assessedCompetencies = assessedCompetencyRaw
           .split(',')
           .map(comp => comp.trim())
           .filter(comp => comp.length > 0);
         
-        // If no valid competencies found, use default
-        const competenciesToAnalyze = assessedCompetencies.length > 0 ? assessedCompetencies : [`Situational Judgment ${i+1}`];
-        
-        console.log(`📊 Question ${i + 1} will be analyzed for competencies: ${competenciesToAnalyze.join(', ')}`);
+        // Build conversation history for this scenario with follow-up detection
+        const conversationHistory = answeredEntries.map((entry, index) => ({
+          question: entry.question,
+          answer: entry.answer!,
+          isFollowUp: entry.isFollowUp || index > 0 // First question is never a follow-up
+        }));
         
         try {
-          // Create analysis for each competency
-          for (const competency of competenciesToAnalyze) {
-            // Create analysis input with all available data from entry
-            const sjtAnalysisInput: AnalyzeSJTResponseInput = {
-              situation: entry.situation || entry.question || "No situation provided",
-              question: entry.question || "No question provided", 
-              bestResponseRationale: entry.bestResponseRationale || "No best response criteria provided",
-              worstResponseRationale: entry.worstResponseRationale || "No worst response criteria provided",
-              assessedCompetency: competency,
-              candidateAnswer: entry.answer,
-            };
+          // Enhanced single-competency analysis - each scenario evaluates only its primary competency  
+          const primaryCompetency = assessedCompetencies[0]; // Use only the first/primary competency
+          console.log(`🚀 Analyzing scenario "${scenarioKey}" for primary competency: ${primaryCompetency}`);
+          
+          // Process only the primary competency for this scenario
+          let competencyResult = null;
+          
+          if (primaryCompetency) {
+            console.log(`🎯 Evaluating primary "${primaryCompetency}" competency`);
             
-            const result = await analyzeSJTResponse(sjtAnalysisInput);
-            
-            // Calculate penalty if follow-up questions were generated for this scenario
-            // Check both the followUpGenerated flag and if there are multiple entries with the same situation
-            const scenarioEntries = submission.history.filter(h => h.situation === entry.situation);
-            const hasMultipleQuestions = scenarioEntries.length > 1;
-            const hasFollowUp = entry.followUpGenerated || hasMultipleQuestions;
-            
-            if (hasMultipleQuestions) {
-              console.log(`🔍 Scenario ${i + 1}: Found ${scenarioEntries.length} questions for this situation - follow-up penalty will be applied`);
-            }
-            
-            const prePenaltyScore = result.score;
-            const postPenaltyScore = hasFollowUp && followUpPenalty > 0 
-              ? Math.max(0, prePenaltyScore * (1 - followUpPenalty / 100))
-              : prePenaltyScore;
-            
-            sjtAnalyses.push({ 
-              ...result, 
-              competency: competency,
-              prePenaltyScore,
-              postPenaltyScore,
-              hasFollowUp,
-              penaltyApplied: hasFollowUp ? followUpPenalty : 0,
-              questionNumber: i + 1, // Add question number for better reporting
-              originalCompetencies: assessedCompetencies // Keep track of all competencies for this question
+            const result = await analyzeSingleCompetency({
+              situation,
+              conversationHistory,
+              targetCompetency: primaryCompetency,
+              bestResponseRationale,
+              worstResponseRationale
             });
-            console.log(`✅ Analysis complete for scenario ${i + 1}, competency "${competency}" (Score: ${prePenaltyScore}${hasFollowUp ? ` → ${postPenaltyScore.toFixed(1)} after ${followUpPenalty}% penalty` : ''})`);
+            
+            competencyResult = { competency: primaryCompetency, ...result };
+            console.log(`✅ Primary "${primaryCompetency}" scored: ${result.score}/10`);
           }
-        } catch (analysisError) {
-          console.warn(`⚠️ Failed to analyze scenario ${i + 1}:`, analysisError);
-        }
+          
+          // Process the single competency result
+          if (competencyResult) {
+            const hasFollowUps = conversationHistory.some(c => c.isFollowUp);
+            const penaltyCalculation = calculatePenaltyScore(
+              competencyResult.score, 
+              hasFollowUps, 
+              followUpPenalty
+            );
+            
+            sjtAnalyses.push({
+              competency: competencyResult.competency,
+              score: competencyResult.score,
+              rationale: competencyResult.rationale,
+              scenarioKey,
+              questionCount: answeredEntries.length,
+              hasFollowUps,
+              conversationQuality: 'Good', // Default for single competency analysis
+              overallAssessment: `Enhanced single-competency analysis for ${competencyResult.competency}`,
+              questionNumber: 1,
+              ...penaltyCalculation
+            });
+          }
+          
+          console.log(`✅ Enhanced analysis completed for scenario "${scenarioKey}": primary competency "${primaryCompetency}" processed`);
+          
+        } catch (enhancedAnalysisError) {
+          console.warn(`⚠️ Enhanced single-competency analysis failed for scenario "${scenarioKey}":`, enhancedAnalysisError);
+          
+          try {
+            // FALLBACK 1: Original scenario analysis with timeout
+            console.log(`🔄 Falling back to original scenario analysis for "${scenarioKey}"`);
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Analysis timeout - using individual fallback')), 30000)
+            );
+            
+            const analysisPromise = analyzeSJTScenario({
+              situation,
+              conversationHistory,
+              bestResponseRationale,
+              worstResponseRationale,
+              assessedCompetencies
+            });
+            
+            const scenarioResult = await Promise.race([analysisPromise, timeoutPromise]) as any;
+            
+            // Add scenario metadata to results with penalty calculations
+            scenarioResult.competencyScores.forEach((competencyScore: any, competencyIndex: number) => {
+              // Calculate penalty based on whether scenario has follow-ups
+              const hasFollowUps = conversationHistory.some(c => c.isFollowUp);
+              const penaltyCalculation = calculatePenaltyScore(
+                competencyScore.score, 
+                hasFollowUps, 
+                followUpPenalty
+              );
+              
+              sjtAnalyses.push({
+                competency: competencyScore.competency,
+                score: competencyScore.score,
+                rationale: competencyScore.rationale,
+                scenarioKey,
+                questionCount: answeredEntries.length,
+                hasFollowUps,
+                conversationQuality: scenarioResult.conversationQuality,
+                overallAssessment: scenarioResult.overallAssessment,
+                questionNumber: competencyIndex + 1,
+                ...penaltyCalculation
+              });
+            });
+            
+            console.log(`✅ Fallback scenario analysis completed for "${scenarioKey}": ${scenarioResult.competencyScores.length} competency scores generated`);
+            
+          } catch (scenarioAnalysisError) {
+            console.warn(`⚠️ Scenario analysis also failed for "${scenarioKey}":`, scenarioAnalysisError);
+            
+            // FALLBACK 2: Individual question analysis
+            console.log(`🔄 Using individual question analysis for scenario "${scenarioKey}"`);
+            
+            for (const [entryIndex, entry] of answeredEntries.entries()) {
+              for (const competency of assessedCompetencies) {
+                try {
+                const sjtAnalysisInput: AnalyzeSJTResponseInput = {
+                  situation,
+                  question: entry.question,
+                  bestResponseRationale,
+                  worstResponseRationale,
+                  assessedCompetency: competency,
+                  candidateAnswer: entry.answer!,
+                };
+                
+                const result = await analyzeSJTResponse(sjtAnalysisInput);
+                
+                // Calculate penalty for fallback analysis
+                const isFollowUp = entry.isFollowUp || entryIndex > 0;
+                const penaltyCalculation = calculatePenaltyScore(
+                  result.score, 
+                  isFollowUp, 
+                  followUpPenalty
+                );
+                
+                sjtAnalyses.push({
+                  competency,
+                  score: result.score,
+                  rationale: result.rationale,
+                  scenarioKey,
+                  questionCount: 1,
+                  hasFollowUps: false,
+                  conversationQuality: 'Fair',
+                  isFallback: true,
+                  questionNumber: entryIndex + 1,
+                  ...penaltyCalculation
+                });
+              } catch (fallbackError) {
+                console.warn(`⚠️ Fallback analysis also failed for entry in scenario "${scenarioKey}":`, fallbackError);
+                
+                // Emergency fallback - create basic analysis to prevent complete failure
+                const isFollowUp = entry.isFollowUp || entryIndex > 0;
+                const penaltyCalculation = calculatePenaltyScore(5, isFollowUp, followUpPenalty); // Default score
+                
+                sjtAnalyses.push({
+                  competency: assessedCompetencies[0] || 'General Assessment',
+                  score: 5,
+                  rationale: 'Emergency analysis - API temporarily unavailable. Default assessment provided.',
+                  scenarioKey,
+                  questionCount: 1,
+                  hasFollowUps: false,
+                  conversationQuality: 'Fair',
+                  isFallback: true,
+                  isEmergencyFallback: true,
+                  questionNumber: entryIndex + 1,
+                  ...penaltyCalculation
+                });
+              }
+            }
+          }
+          } // Close scenarioAnalysisError catch block
+        } // Close enhancedAnalysisError catch block
+        
+        scenarioIndex++; // Increment for next scenario
       }
       
-        // Create enhanced result if we got analyses
-        if (sjtAnalyses.length > 0) {
+      // Create enhanced result if we got analyses
+      if (sjtAnalyses.length > 0) {
           // Separate responses using post-penalty scores for categorization
           const strongResponses = sjtAnalyses.filter(a => a.postPenaltyScore >= 7);
           const improvementAreas = sjtAnalyses.filter(a => a.postPenaltyScore < 7);
-          const averageResponses = sjtAnalyses.filter(a => a.postPenaltyScore >= 5 && a.postPenaltyScore < 7);        // Generate detailed strengths organized by competency - AI driven only
+          const averageResponses = sjtAnalyses.filter(a => a.postPenaltyScore >= 5 && a.postPenaltyScore < 7);
+        
+        // ===== COMMENTED OUT - REDUNDANT MANUAL TEXT BUILDING =====
+        // These sections are now redundant since AI-generated competency summaries 
+        // in Section 2 provide better, more concise insights
+        
+        // Placeholder variables for commented-out manual text building
+        const strengthsText = "Analysis completed. Please refer to Competency Analysis Summary for detailed insights.";
+        const weaknessesText = "Analysis completed. Please refer to Competency Analysis Summary for detailed insights.";
+        
+        /* COMMENTED OUT - MANUAL STRENGTHS TEXT BUILDING
+        // Generate detailed strengths organized by competency - AI driven only
         let strengthsText = "";
         
         // Group all responses by competency (including low scores to check for negligible strengths)
@@ -287,6 +457,7 @@ export async function POST(request: NextRequest) {
           weaknessesText += "ADDITIONAL WEAKNESSES:\n\n";
           weaknessesText += "No significant development areas identified through AI analysis.\n\n";
         }
+        END OF COMMENTED OUT MANUAL TEXT BUILDING */
 
         // Process analyses to combine scores for the same competency using post-penalty scores
         const competencyMap = new Map<string, { totalPrePenaltyScore: number, totalPostPenaltyScore: number, count: number }>();
@@ -356,21 +527,43 @@ OVERALL ASSESSMENT: ${strongResponses.length > improvementAreas.length ?
   'The candidate shows engagement with complex workplace scenarios but would benefit from focused development in key competency areas before advancing. A structured development plan is recommended.' :
   'The candidate shows balanced performance across assessed competencies with equal strengths and development opportunities. Continued growth and targeted skill enhancement will support their professional advancement.'}`;
 
-        // Generate question-wise details for Section 3
-        const questionwiseDetails: QuestionwiseDetail[] = sjtAnalyses.map((analysis, index) => ({
-          questionNumber: index + 1,
-          question: submission.history[index]?.question || 'Question not recorded',
-          candidateAnswer: submission.history[index]?.answer || 'No answer provided',
-          competency: analysis.competency,
-          prePenaltyScore: analysis.prePenaltyScore,
-          postPenaltyScore: analysis.postPenaltyScore,
-          penaltyApplied: analysis.penaltyApplied,
-          hasFollowUp: analysis.hasFollowUp,
-          rationale: analysis.rationale,
-          // TODO: Add follow-up questions and answers from conversation history
-          followUpQuestions: [], // These would come from the enhanced conversation tracking
-          followUpAnswers: []
-        }));
+        // Generate question-wise details for Section 3 - FIXED: Map individual questions correctly
+        console.log(`🔍 Generating Section 3 details for ${submission.history.length} individual questions`);
+        
+        const questionwiseDetails: QuestionwiseDetail[] = submission.history
+          .filter(entry => entry.answer) // Only include answered questions
+          .map((entry, questionIndex) => {
+            // Find which scenario analysis this question belongs to
+            const matchingAnalysis = sjtAnalyses.find(analysis => {
+              // Match by scenario key - find the analysis that covers this question's scenario
+              const entryScenarioKey = entry.situation ? 
+                entry.situation.trim().substring(0, 50).replace(/[^\w\s]/g, '').trim() :
+                `Question_${questionIndex + 1}`;
+              return analysis.scenarioKey === entryScenarioKey;
+            });
+            
+            // Fallback to first analysis if no match found (should not happen with proper grouping)
+            const analysisToUse = matchingAnalysis || sjtAnalyses[0];
+            
+            return {
+              questionNumber: questionIndex + 1,
+              question: entry.question,
+              candidateAnswer: entry.answer!,
+              competency: analysisToUse?.competency || 'General Assessment',
+              prePenaltyScore: analysisToUse?.prePenaltyScore || 5,
+              postPenaltyScore: analysisToUse?.postPenaltyScore || 5,
+              penaltyApplied: analysisToUse?.penaltyApplied || 0,
+              hasFollowUp: analysisToUse?.hasFollowUp || false,
+              rationale: analysisToUse?.rationale || 'Analysis not available for this question.',
+              // TODO: Add follow-up questions and answers from conversation history
+              followUpQuestions: [],
+              followUpAnswers: []
+            };
+          });
+          
+        console.log(`✅ Generated Section 3 with ${questionwiseDetails.length} question entries (from ${sjtAnalyses.length} scenario analyses)`);
+        console.log(`📊 Section 3 Details: Questions ${questionwiseDetails.map(q => q.questionNumber).join(', ')}`);
+        console.log(`📊 Scenario Analyses: ${sjtAnalyses.map(a => a.scenarioKey).join(', ')}`);
 
         // Generate qualitative summaries for each competency (Section 2)
         console.log('🤖 Generating competency-specific qualitative summaries...');
@@ -378,21 +571,46 @@ OVERALL ASSESSMENT: ${strongResponses.length > improvementAreas.length ?
         
         for (const [competencyName, data] of competencyMap.entries()) {
           try {
-            // Get all responses for this competency
-            const competencyResponses = sjtAnalyses
-              .map((analysis, index) => ({
-                questionNumber: index + 1,
-                question: submission.history[index]?.question || 'Question not recorded',
-                candidateAnswer: submission.history[index]?.answer || 'No answer provided',
-                prePenaltyScore: analysis.prePenaltyScore,
-                postPenaltyScore: analysis.postPenaltyScore,
-                penaltyApplied: analysis.penaltyApplied,
-                hasFollowUp: analysis.hasFollowUp,
-                rationale: analysis.rationale,
-                followUpQuestions: [], // TODO: Extract from conversation history
-                followUpAnswers: []
-              }))
-              .filter((_, index) => sjtAnalyses[index].competency === competencyName);
+            // Get all questions for this competency - FIXED: Map individual questions correctly
+            console.log(`🎯 Generating summary for competency: ${competencyName}`);
+            
+            const competencyResponses = submission.history
+              .filter(entry => entry.answer) // Only answered questions
+              .map((entry, questionIndex) => {
+                // Find the analysis for this question's scenario
+                const entryScenarioKey = entry.situation ? 
+                  entry.situation.trim().substring(0, 50).replace(/[^\w\s]/g, '').trim() :
+                  `Question_${questionIndex + 1}`;
+                
+                const matchingAnalysis = sjtAnalyses.find(analysis => 
+                  analysis.scenarioKey === entryScenarioKey && analysis.competency === competencyName
+                );
+                
+                return {
+                  questionNumber: questionIndex + 1,
+                  question: entry.question,
+                  candidateAnswer: entry.answer!,
+                  prePenaltyScore: matchingAnalysis?.prePenaltyScore || 5,
+                  postPenaltyScore: matchingAnalysis?.postPenaltyScore || 5,
+                  penaltyApplied: matchingAnalysis?.penaltyApplied || 0,
+                  hasFollowUp: matchingAnalysis?.hasFollowUp || false,
+                  rationale: matchingAnalysis?.rationale || 'Analysis not available for this question.',
+                  followUpQuestions: [],
+                  followUpAnswers: []
+                };
+              })
+              .filter(response => {
+                // Only include questions that actually assess this competency
+                const entryScenarioKey = submission.history[response.questionNumber - 1]?.situation ? 
+                  submission.history[response.questionNumber - 1].situation!.trim().substring(0, 50).replace(/[^\w\s]/g, '').trim() :
+                  `Question_${response.questionNumber}`;
+                
+                return sjtAnalyses.some(analysis => 
+                  analysis.scenarioKey === entryScenarioKey && analysis.competency === competencyName
+                );
+              });
+
+            console.log(`📊 Found ${competencyResponses.length} questions for competency "${competencyName}"`);
 
             const overallScore = Math.round((data.totalPostPenaltyScore / data.count) * 10) / 10;
             
@@ -436,17 +654,28 @@ OVERALL ASSESSMENT: ${strongResponses.length > improvementAreas.length ?
         };
 
         analysisResult = {
-          strengths: strengthsText,
-          weaknesses: weaknessesText,
-          summary: summaryText,
+          // COMMENTED OUT - Redundant fields (replaced by more efficient AI summaries in sections 1-3)
+          // strengths: strengthsText,
+          // weaknesses: weaknessesText,
+          // summary: summaryText,
+          // competencyAnalysis: [{
+          //   name: "Situational Competencies", 
+          //   competencies: uniqueCompetencies.sort((a,b) => a.name.localeCompare(b.name)),
+          // }],
+          
+          // Active sections - Focused analysis (Sections 1-3)
+          scoresSummary,
+          competencyQualitativeSummary: competencyQualitativeSummary.sort((a,b) => a.name.localeCompare(b.name)),
+          questionwiseDetails,
+          
+          // Minimal backward compatibility
+          strengths: "Analysis completed. Please refer to Competency Analysis Summary for detailed insights.",
+          weaknesses: "Analysis completed. Please refer to Competency Analysis Summary for detailed insights.", 
+          summary: summaryText, // Keep this as it's used in other parts
           competencyAnalysis: [{
             name: "Situational Competencies",
             competencies: uniqueCompetencies.sort((a,b) => a.name.localeCompare(b.name)),
-          }],
-          // New chunked analysis sections
-          scoresSummary,
-          competencyQualitativeSummary: competencyQualitativeSummary.sort((a,b) => a.name.localeCompare(b.name)),
-          questionwiseDetails
+          }]
         };
       } else {
         // Fall back to basic result if no AI analysis

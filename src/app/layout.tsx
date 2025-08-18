@@ -3,6 +3,7 @@ import { Inter, Space_Grotesk, Source_Code_Pro } from 'next/font/google';
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 import { AuthProvider } from '@/contexts/auth-context';
+import { LanguageProvider } from '@/contexts/language-context';
 import StorageNotification from '@/components/storage-notification';
 import UserList from '@/components/user-list';
 
@@ -42,16 +43,18 @@ export default function RootLayout({
       <body className="font-body antialiased" suppressHydrationWarning={true}>
         <StorageNotification />
         <AuthProvider>
-          <UserList />
-          <div className="animation-container">
-            <div className="blob blob-1" />
-            <div className="blob blob-2" />
-            <div className="blob blob-3" />
-          </div>
-          <main className="relative z-10">
-            {children}
-          </main>
-          <Toaster />
+          <LanguageProvider>
+            <UserList />
+            <div className="animation-container">
+              <div className="blob blob-1" />
+              <div className="blob blob-2" />
+              <div className="blob blob-3" />
+            </div>
+            <main className="relative z-10">
+              {children}
+            </main>
+            <Toaster />
+          </LanguageProvider>
         </AuthProvider>
       </body>
     </html>

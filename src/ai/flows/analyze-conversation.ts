@@ -11,12 +11,19 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
+import { translateToEnglish } from './translate-text';
+import { translationService } from '@/lib/translation-service';
 
 const QuestionAnswerSchema = z.object({
   question: z.string(),
   answer: z.string(),
   preferredAnswer: z.string().optional().describe("Guidance on what constitutes a good answer for this specific question."),
   competency: z.string().optional().describe("The competency this question is designed to assess."),
+  // Multilingual fields
+  languageCode: z.string().optional().describe("Language code of the original answer"),
+  answerNative: z.string().optional().describe("Original answer in native language"),
+  answerEn: z.string().optional().describe("Answer translated to English"),
+  questionTranslated: z.string().optional().describe("Question translated to user's language"),
 });
 
 const AnalyzeConversationInputSchema = z.object({
@@ -75,7 +82,7 @@ const prompt = ai.definePrompt({
   name: 'analyzeConversationPrompt',
   input: {schema: AnalyzeConversationInputSchema.extend({ competenciesToAssess: z.string() })},
   output: {schema: AnalyzeConversationOutputSchema},
-  model: 'googleai/gemini-2.0-flash',
+  model: process.env.GEMINI_DEFAULT_MODEL || 'googleai/gemini-2.0-flash-lite',
   prompt: `You are an expert AI hiring analyst for a top-tier recruitment firm. Your task is to evaluate a candidate named {{{name}}} for a {{{roleCategory}}} position based on the provided job description and interview transcript.
 
 **Job Description Context:**
@@ -138,7 +145,42 @@ const analyzeConversationFlow = ai.defineFlow(
     outputSchema: AnalyzeConversationOutputSchema,
   },
   async input => {
-    const {output} = await prompt(input);
+    // Preprocess conversation history to ensure answers are in English
+    let processedInput = { ...input };
+    
+    try {
+      if (input.conversationHistory && input.conversationHistory.length > 0) {
+        const translatedHistory = await Promise.all(
+          input.conversationHistory.map(async (qa) => {
+            if (qa.answer && qa.answer.trim()) {
+              try {
+                // Use new translation service for better handling
+                const translatedAnswer = qa.languageCode && qa.languageCode !== 'en' 
+                  ? await translationService.translate(qa.answer, 'en', qa.languageCode)
+                  : qa.answer;
+                
+                return {
+                  ...qa,
+                  answer: translatedAnswer,
+                  answerEn: translatedAnswer,
+                  answerNative: qa.answerNative || qa.answer
+                };
+              } catch (translationError) {
+                console.warn('Failed to translate conversation answer, using original:', translationError);
+                return qa; // Fallback to original
+              }
+            }
+            return qa;
+          })
+        );
+        processedInput.conversationHistory = translatedHistory;
+      }
+    } catch (preprocessError) {
+      console.warn('Conversation preprocessing failed, using original input:', preprocessError);
+      // Continue with original input if preprocessing fails
+    }
+    
+    const {output} = await prompt(processedInput);
     if (!output || !output.strengths || !output.weaknesses || !output.summary || !output.competencyAnalysis) {
       throw new Error("AI analysis did not return a valid structured report.");
     }

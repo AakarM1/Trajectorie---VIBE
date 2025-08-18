@@ -29,7 +29,8 @@ interface TestSettings {
   timeLimit: number; // in minutes, 0 for no limit
   numberOfQuestions: number;
   questionTimeLimit: number; // per-question time limit in seconds
-  aiGeneratedQuestions: number; // Number of AI-generated follow-up questions
+  aiGeneratedQuestions: number; // DEPRECATED: For backward compatibility only
+  followUpCount: number; // Number of AI-generated follow-up questions (NEW)
   followUpPenalty: number; // Percentage penalty for follow-up questions (0-100)
 }
 
@@ -37,7 +38,14 @@ interface TestSettings {
 const SJTConfigPage = () => {
   const { toast } = useToast();
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
-  const [settings, setSettings] = useState<TestSettings>({ timeLimit: 0, numberOfQuestions: 5, questionTimeLimit: 120, aiGeneratedQuestions: 0, followUpPenalty: 0 });
+  const [settings, setSettings] = useState<TestSettings>({ 
+    timeLimit: 0, 
+    numberOfQuestions: 5, 
+    questionTimeLimit: 120, 
+    aiGeneratedQuestions: 0, // Keep for backward compatibility
+    followUpCount: 1, // NEW: Default to 1 follow-up question
+    followUpPenalty: 0 
+  });
 
 
   useEffect(() => {
@@ -57,7 +65,8 @@ const SJTConfigPage = () => {
                 timeLimit: savedSettings.timeLimit || 0,
                 numberOfQuestions: savedSettings.numberOfQuestions || 5,
                 questionTimeLimit: savedSettings.questionTimeLimit || 120,
-                aiGeneratedQuestions: savedSettings.aiGeneratedQuestions || 0,
+                aiGeneratedQuestions: savedSettings.aiGeneratedQuestions || 0, // Keep for backward compatibility
+                followUpCount: savedSettings.followUpCount ?? savedSettings.aiGeneratedQuestions ?? 1, // Migration logic
                 followUpPenalty: savedSettings.followUpPenalty || 0,
              });
           }
@@ -172,15 +181,21 @@ const SJTConfigPage = () => {
                             <p className="text-xs text-muted-foreground">Set to 0 to use all created scenarios.</p>
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="ai-questions-number" className="flex items-center gap-2"><BrainCircuit /> AI Follow-Up Questions</Label>
+                            <Label htmlFor="follow-up-count" className="flex items-center gap-2"><BrainCircuit /> Follow-Up Questions</Label>
                             <Input
-                                id="ai-questions-number"
+                                id="follow-up-count"
                                 type="number"
-                                value={settings.aiGeneratedQuestions}
-                                onChange={(e) => setSettings(s => ({ ...s, aiGeneratedQuestions: parseInt(e.target.value, 10) || 0 }))}
-                                placeholder="e.g., 2"
+                                min="0"
+                                max="5"
+                                value={settings.followUpCount}
+                                onChange={(e) => setSettings(s => ({ 
+                                  ...s, 
+                                  followUpCount: Math.min(5, Math.max(0, parseInt(e.target.value, 10) || 0)),
+                                  aiGeneratedQuestions: Math.min(5, Math.max(0, parseInt(e.target.value, 10) || 0)) // Keep synced
+                                }))}
+                                placeholder="e.g., 1"
                             />
-                            <p className="text-xs text-muted-foreground">Number of AI-generated follow-up questions per scenario.</p>
+                            <p className="text-xs text-muted-foreground">Number of AI-generated follow-up questions per scenario (0-5).</p>
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="follow-up-penalty" className="flex items-center gap-2"><TrendingDown /> Follow Up Penalty (%)</Label>

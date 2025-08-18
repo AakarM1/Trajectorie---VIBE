@@ -87,15 +87,15 @@ TASK: Generate specific, evidence-based summaries for this competency:
 
 **Instructions for strengthSummary**:
 - Write 2-3 lines highlighting what the candidate did well in demonstrating this competency
-- Reference specific examples from their responses
-- Focus on behaviors, approaches, or insights that align with best practices for this competency
-- Use positive, professional language
+- Focus on professional judgment, workplace appropriateness, and competency understanding shown
+- Reference the spirit and approach of their responses rather than specific phrases
+- Use positive, professional language that recognizes competency demonstration
 
 **Instructions for weaknessSummary**:
-- Write 2-3 lines identifying specific areas where the candidate could improve in this competency
-- Reference gaps or missed opportunities in their responses
-- Provide constructive feedback that would help them develop this competency
-- Be specific about what they should focus on improving
+- Write 2-3 lines identifying areas where the candidate could strengthen this competency
+- Focus on gaps in professional approach or competency understanding
+- Provide constructive feedback for competency development rather than specific phrase requirements
+- Be specific about competency skills they should focus on improving
 
 Both summaries should be:
 - Specific to this competency only
